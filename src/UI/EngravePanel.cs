@@ -45,6 +45,11 @@ namespace Engrave.UI
         private readonly CheckBox _includeProp = new CheckBox { Text = "Put an iProperty in front of the name", AutoSize = true };
         private readonly FieldBox _propName, _propValue;
         private Control _textHeader, _textBody;
+        private TableLayoutPanel _propRow;   // the iProperty name field with its pick button
+        private IconButton _propPick;
+
+        /// <summary>Custom iProperties of the open document, with their values, for the pick menu; set by the command.</summary>
+        public Func<IList<KeyValuePair<string, string>>> CustomProperties;
         private readonly Label _propHint = new Label { AutoSize = true, Tag = "keep" };
 
         // engraving
@@ -159,7 +164,7 @@ namespace Engrave.UI
 
         private void UpdateOrderRow()
         {
-            ShowRow(_propName, _includeProp.Checked);
+            ShowRow(_propRow, _includeProp.Checked);
             ShowRow(_propValue, _includeProp.Checked);
         }
 
@@ -283,7 +288,7 @@ namespace Engrave.UI
             _secondary.Text = "Cancel";
             _secondary.Visible = picking || mode == PanelMode.Sketching;
             _skip.Visible = picking && canSkip;
-            foreach (Control c in new Control[] { _includeProp, _propName, _propValue, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
+            foreach (Control c in new Control[] { _includeProp, _propName, _propPick, _propValue, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
                 c.Enabled = picking;
             UpdateExistingButtons();
             _primary.Invalidate();
@@ -358,7 +363,17 @@ namespace Engrave.UI
         {
             var t = Table();
             Wide(t, _includeProp);
-            Row(t, "iProperty", _propName);
+            _propPick = new IconButton(_theme, "Pick an iProperty", DrawCaret) { Size = new Size(26, 22) };
+            _propRow = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            _propRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _propRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
+            _propName.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            _propName.Margin = Padding.Empty;
+            _propPick.Margin = new Padding(4, 0, 0, 0);
+            _propRow.Controls.Add(_propName, 0, 0);
+            _propRow.Controls.Add(_propPick, 1, 0);
+            Row(t, "iProperty", _propRow);
+            _propRow.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             Row(t, "Value", _propValue);
             Wide(t, _propHint);
             Row(t, "Name length", _maxChars);
@@ -443,6 +458,64 @@ namespace Engrave.UI
                 row.Done ? _theme.Link : _theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
+        // ----- iProperty pick menu -------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Like the "+" menu of the iProperty Manager: a submenu per tab of Inventor's iProperties dialog, and a Custom
+        /// submenu with the custom iProperties of the open document (and their values) and a box to type any name.
+        /// </summary>
+        private ContextMenuStrip PropertyMenu()
+        {
+            var menu = new ThemedMenu(_theme);
+            foreach ((string tab, string[] names) in PropertyCatalog.Tabs)
+            {
+                var sub = new ToolStripMenuItem(tab);
+                foreach (string n in names) sub.DropDownItems.Add(PickItem(n, n));
+                ThemedMenu.Style(sub, _theme);
+                menu.Items.Add(sub);
+            }
+
+            var custom = new ToolStripMenuItem("Custom");
+            IList<KeyValuePair<string, string>> existing = null;
+            try { existing = CustomProperties?.Invoke(); } catch { }
+            if (existing != null && existing.Count > 0)
+            {
+                foreach (KeyValuePair<string, string> kv in existing)
+                    custom.DropDownItems.Add(PickItem(kv.Key, kv.Value.Length > 0 ? kv.Key + "   (" + kv.Value + ")" : kv.Key));
+                custom.DropDownItems.Add(new ToolStripSeparator());
+            }
+            var typed = new ToolStripTextBox { AutoSize = false, Width = 180, BackColor = _theme.Back, ForeColor = _theme.Text, BorderStyle = BorderStyle.FixedSingle, ToolTipText = "Type a name and press Enter" };
+            typed.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode != Keys.Enter) return;
+                e.SuppressKeyPress = true;
+                menu.Close();
+                if (typed.Text.Trim().Length > 0) _propName.Text = typed.Text.Trim();
+            };
+            custom.DropDownItems.Add(new ToolStripLabel("Other name (Enter to use):") { ForeColor = _theme.Dim });
+            custom.DropDownItems.Add(typed);
+            custom.DropDownOpened += (s, e) => typed.Focus();
+            ThemedMenu.Style(custom, _theme);
+            menu.Items.Add(custom);
+            return menu;
+        }
+
+        private ToolStripMenuItem PickItem(string name, string text)
+        {
+            bool current = string.Equals(name, PropertyName, StringComparison.OrdinalIgnoreCase);
+            var item = new ToolStripMenuItem(text) { ForeColor = current ? _theme.Link : _theme.Text };
+            item.Click += (s, e) => _propName.Text = name;   // raises PropertyNameChanged, which reads the value
+            return item;
+        }
+
+        private static void DrawCaret(Graphics g, Rectangle b, Color ink)
+        {
+            Rectangle r = new Rectangle(b.X + (b.Width - 12) / 2, b.Y + (b.Height - 12) / 2, 12, 12);
+            if (WeaveIcons.Draw(g, r, "caret-down-xs")) return;
+            using (var brush = new SolidBrush(ink))
+                g.FillPolygon(brush, new[] { new PointF(r.X + 2, r.Y + 4), new PointF(r.Right - 2, r.Y + 4), new PointF(r.X + 6, r.Bottom - 3) });
+        }
+
         /// <summary>A tick: bright for parts engraved in this run, dim for parts that were engraved before.</summary>
         private static void DrawCheck(Graphics g, Rectangle r, Color color)
         {
@@ -502,6 +575,7 @@ namespace Engrave.UI
             _includeProp.CheckedChanged += (s, e) => { UpdateOrderRow(); if (!_loading) OrderChanged?.Invoke(); };
             _propValue.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
             _propName.TextChanged += (s, e) => { if (!_loading) PropertyNameChanged?.Invoke(); };
+            _propPick.Click += (s, e) => PropertyMenu().Show(_propPick, new Point(0, _propPick.Height));
             _text.TextChanged += (s, e) => { if (!_loading) { _text.Invalid = false; TextEdited?.Invoke(); } };
             _parts.SelectedIndexChanged += (s, e) =>
             {

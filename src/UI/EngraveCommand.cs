@@ -183,6 +183,7 @@ namespace Engrave.UI
 
             _panel.OrderChanged += OnOrderChanged;
             _panel.PropertyNameChanged += OnPropertyNameChanged;
+            _panel.CustomProperties = CustomProperties;
             _panel.TextEdited += OnTextEdited;
             _panel.PartChosen += k => Choose(_walk[k]);
             _panel.PickClicked += () => { if (_events == null) StartPicking(); else StopPicking(); };
@@ -368,6 +369,24 @@ namespace Engrave.UI
             else if (_panel.PropertyValue.Length == 0)
                 _panel.SetOrderHint("“" + _panel.PropertyName + "” is empty here: the text is the part number only.", false);
             else _panel.SetOrderHint("The value is put in front of the part number.", false);
+        }
+
+        /// <summary>The custom iProperties of the open assembly or part with their values, sorted by name.</summary>
+        private IList<KeyValuePair<string, string>> CustomProperties()
+        {
+            var list = new List<KeyValuePair<string, string>>();
+            try
+            {
+                foreach (Property p in _top.PropertySets["User Defined Properties"])
+                {
+                    string value = "";
+                    try { value = (Convert.ToString(p.Value) ?? "").Trim(); } catch { }
+                    list.Add(new KeyValuePair<string, string>(p.Name, value));
+                }
+            }
+            catch { }
+            list.Sort((x, y) => string.Compare(x.Key, y.Key, StringComparison.CurrentCultureIgnoreCase));
+            return list;
         }
 
         /// <summary>A new iProperty name: read its value from the open assembly or part.</summary>
