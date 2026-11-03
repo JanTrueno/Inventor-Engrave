@@ -6,9 +6,6 @@ part. For sheet metal it shows which side is the top. The text is placed as a sk
 it in Inventor's sketch environment, and it is then engraved with Inventor's Emboss (Engrave from Face). The panel is
 built in Inventor's own style and follows your theme, like the Tab and Slot add-in.
 
-It replaces the "Graveren" iLogic rules (assembly, part and drawing versions) and uses the same feature and sketch
-names (`Graveer`, `GraveerSketch`), so engravings made with those rules are found, listed and replaced too.
-
 ## Features
 
 - **Assembly**: every visible part that can be changed is listed once, also when it is used several times (the

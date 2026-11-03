@@ -8,8 +8,7 @@ namespace Engrave.Core
     /// <summary>
     /// Puts the text as a sketch on a face, engraves it with Inventor's Emboss (Engrave from Face), and finds, edits or
     /// deletes engravings made earlier. On a round face the sketch goes on a work plane tangent to the face at the picked
-    /// point and the engraving is wrapped onto the face. The names are those of the iLogic rule this add-in replaces, so
-    /// engravings made by the rule (extrude cuts) are found too.
+    /// point and the engraving is wrapped onto the face. Engravings are found by name, as an emboss or as an extrude cut.
     /// </summary>
     internal static class Engraver
     {
@@ -22,7 +21,7 @@ namespace Engrave.Core
 
         // ----- finding ------------------------------------------------------------------------------------------
 
-        /// <summary>The engraving feature of the part (an emboss, or an extrude cut made by the old rule), or null.</summary>
+        /// <summary>The engraving feature of the part (an emboss, or an extrude cut of the same name), or null.</summary>
         public static PartFeature Find(PartDocument part)
         {
             try
