@@ -53,6 +53,8 @@ The project references `Autodesk.Inventor.Interop.dll` from the Inventor install
 `HintPath` in `Engrave.csproj` to match.
 
 ```powershell
+git clone https://github.com/JanTrueno/Inventor-Engrave.git
+cd Inventor-Engrave
 dotnet build Engrave.csproj -c Release
 ```
 
