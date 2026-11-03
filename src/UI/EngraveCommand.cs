@@ -63,7 +63,26 @@ namespace Engrave.UI
         private ComponentOccurrence _editedOcc;   // the last occurrence opened for in-place editing
         private int _engraved;
         private int _changes;                     // engravings, edits and deletions in this run
-        private CheckPoint _start;                // Cancel goes back to here
+        private string _lastCommand = "";         // the last Inventor command started, to recognise Return
+
+        /// <summary>How a part was before this run, so Cancel can put it back; Done removes what was set aside.</summary>
+        private sealed class PartState
+        {
+            public PartDocument Part;
+            public bool HadEngraving;
+            public bool SetAside;                        // its engraving was replaced or deleted in this run
+            public List<Engraver.TextState> Before;      // the text boxes before the first edit
+        }
+
+        private readonly Dictionary<string, PartState> _touched = new Dictionary<string, PartState>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Inventor's Return commands; they end the picking, which Engrave then simply starts again.</summary>
+        private static readonly HashSet<string> ReturnCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "AppReturnParentCmd", "AppReturnPreviousCmd", "AppReturnTopCmd", "AppReturnBaseEnv", "AssemblyFinishEditCmd"
+        };
+
+        private UserInputEvents _input;
         private bool _finished;
 
         private EngraveCommand(Inventor.Application app, Document top)
@@ -197,8 +216,8 @@ namespace Engrave.UI
             if (_drawing == null) CreateHighlightSets(_top);
             _wait.Tick += (s, e) => { if (!InSketch()) SketchClosed(); };
             _panel.TertiaryClicked += OnSkip;
-            try { _start = _app.TransactionManager.SetCheckPoint(); }
-            catch (Exception ex) { Log.Write("Setting the undo check point failed: " + ex.Message); }
+            _input = _app.CommandManager.UserInputEvents;
+            _input.OnActivateCommand += OnActivateCommand;
 
             _appEvents = _app.ApplicationEvents;
             _appEvents.OnCloseDocument += OnCloseDocument;
@@ -479,11 +498,40 @@ namespace Engrave.UI
             _panel?.SetPick(false, "");
         }
 
-        /// <summary>Another command or Esc ended the picking; the command itself stays open.</summary>
+        private void OnActivateCommand(string commandName, NameValueMap context) => _lastCommand = commandName ?? "";
+
+        /// <summary>
+        /// Another command or Esc ended the picking; the command itself stays open. After one of Inventor's Return
+        /// commands picking simply starts again, so Return does not get in the way.
+        /// </summary>
         private void OnTerminate()
         {
             StopPicking();
-            if (!_finished) _panel.SetStatus("Picking stopped. Click the Face field to pick again.", false);
+            if (_finished) return;
+            if (ReturnCommands.Contains(_lastCommand))
+            {
+                _lastCommand = "";
+                _panel.BeginInvoke(new Action(() =>
+                {
+                    LeaveEdit();
+                    if (_current >= 0) Highlight(_items[_current]);
+                    StartPicking();
+                }));
+                return;
+            }
+            _panel.SetStatus("Picking stopped. Click the Face field, or a part in the list, to go on.", false);
+        }
+
+        /// <summary>The part this run is about to change; remembers how it was before, the first time.</summary>
+        private PartState Touch(PartDocument part)
+        {
+            string key = ((Document)part).FullFileName;
+            if (!_touched.TryGetValue(key, out PartState st))
+            {
+                st = new PartState { Part = part, HadEngraving = Engraver.Find(part) != null };
+                _touched[key] = st;
+            }
+            return st;
         }
 
         private void OnPreSelect(ref object entity, out bool doHighlight, ref ObjectCollection more, SelectionDeviceEnum device,
@@ -559,6 +607,7 @@ namespace Engrave.UI
             PlanarSketch sketch = null;
             try
             {
+                Touch(item.Part);   // remember how the part was, for Cancel
                 sketch = Engraver.Start(_app, item.Part, occ, face, point, view, text.Trim(), _settings, warnings);
                 if (occ != null) { occ.Edit(); _editedOcc = occ; }
                 sketch.Edit();
@@ -659,6 +708,7 @@ namespace Engrave.UI
                 item.Done = true;
                 item.Skipped = false;
                 _engraved++;
+                Touch(item.Part).SetAside = true;   // its earlier engraving, if any, is now set aside
                 SetTransparent(item, true);   // finished parts fade out, so what is left stands out
                 _panel.SetStatus(status, false);
                 if (_walk.Count > 1) Advance();
@@ -694,7 +744,7 @@ namespace Engrave.UI
             if (_mode == PanelMode.Picking)
             {
                 if (_changes > 0 && MessageBox.Show(_owner,
-                        "Undo everything Engrave did since it started (" + _changes + (_changes == 1 ? " change" : " changes") + ") and close?",
+                        "Put back everything Engrave changed since it started (" + _changes + (_changes == 1 ? " change" : " changes") + ") and close?",
                         "Engrave", MessageBoxButtons.OKCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
                 Finish(false, true);
                 return;
@@ -718,8 +768,11 @@ namespace Engrave.UI
         {
             if (_mode != PanelMode.Picking) return;
             Item item = _items[index];
-            PlanarSketch sketch = Engraver.SketchOf(Engraver.Find(item.Part));
+            PartFeature existing = Engraver.Find(item.Part);
+            PlanarSketch sketch = Engraver.SketchOf(existing);
             if (sketch == null) { _panel.SetStatus("The text sketch of this engraving cannot be found.", true); return; }
+            PartState state = Touch(item.Part);
+            if (state.Before == null && !state.SetAside) state.Before = Engraver.Snapshot(existing);   // for Cancel
             StopPicking();
             _current = index;
             try { ShowPart(item); }
@@ -779,6 +832,7 @@ namespace Engrave.UI
                 {
                     try
                     {
+                        Touch(item.Part).SetAside = true;
                         Engraver.Delete(item.Part, warnings);
                         item.Done = false;
                         deleted++;
@@ -839,11 +893,12 @@ namespace Engrave.UI
 
             StopPicking();
             try { _appEvents.OnCloseDocument -= OnCloseDocument; } catch { }
+            try { _input.OnActivateCommand -= OnActivateCommand; } catch { }
             try { _hiPart?.Delete(); } catch { }
             try { _hiFaces?.Delete(); } catch { }
             ReturnToTop();
             RestoreTransparency();
-            if (undo && _changes > 0) UndoRun();
+            if (undo) RevertRun(); else CommitRun();
             try { _asm?.Update(); } catch { }
             try { _app.StatusBarText = ""; } catch { }
 
@@ -859,20 +914,36 @@ namespace Engrave.UI
             MessageBox.Show(_owner, message, "Engrave", MessageBoxButtons.OK, _warnings.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
-        /// <summary>Undoes every transaction since the command started, through the check point set in <see cref="Run"/>.</summary>
-        private void UndoRun()
+        /// <summary>Done: the engravings that were replaced or deleted in this run are removed for good.</summary>
+        private void CommitRun()
         {
-            try
+            foreach (PartState st in _touched.Values)
             {
-                if (_start == null) throw new InvalidOperationException("there is no undo check point");
-                _app.TransactionManager.GoToCheckPoint(_start);
+                try { Engraver.Commit(st.Part); }
+                catch (Exception ex) { Log.Write("Tidying " + st.Part.FullDocumentName + " failed: " + ex); }
             }
-            catch (Exception ex)
+        }
+
+        /// <summary>Cancel: every part this run changed is put back as it was (one undo step).</summary>
+        private void RevertRun()
+        {
+            if (_touched.Count == 0) return;
+            var warnings = new List<string>();
+            Transaction tx = null;
+            try { tx = _app.TransactionManager.StartTransaction((_Document)_top, "Cancel Engrave"); } catch { }
+            foreach (PartState st in _touched.Values)
             {
-                Log.Write("Undoing the run failed: " + ex);
-                MessageBox.Show(_owner, "The changes could not be undone automatically (" + ex.Message + ").\n\nUse Undo, or close the files without saving.",
+                try { Engraver.Revert(st.Part, st.HadEngraving, st.Before, warnings); }
+                catch (Exception ex)
+                {
+                    Log.Write("Putting " + st.Part.FullDocumentName + " back failed: " + ex);
+                    warnings.Add(EngraveText.PartName(st.Part) + ": " + ex.Message);
+                }
+            }
+            try { tx?.End(); } catch { }
+            if (warnings.Count > 0)
+                MessageBox.Show(_owner, "Not everything could be put back:\n" + string.Join("\n", warnings) + "\n\nCheck these parts before saving.",
                     "Engrave", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
         }
 
         /// <summary>Leaves in-place editing of a part, so the assembly is active again at its top level.</summary>
@@ -899,13 +970,25 @@ namespace Engrave.UI
             if (_asm == null || _editedOcc == null) return;
             ComponentOccurrence occ = _editedOcc;
             _editedOcc = null;
+            if (!InPartEdit()) return;   // already back at the top (for example after Return)
             try { occ.ExitEdit(ExitTypeEnum.kExitToTop); }
             catch (Exception ex)
             {
                 Log.Write("ExitEdit failed: " + ex.Message);
-                try { _app.CommandManager.ControlDefinitions["AssemblyReturnToTopCmd"].Execute2(true); }
+                try { _app.CommandManager.ControlDefinitions["AppReturnTopCmd"].Execute2(true); }
                 catch (Exception ex2) { Log.Write("Return to top failed: " + ex2.Message); }
             }
+        }
+
+        /// <summary>True while a part (or a sketch in it) is being edited in place in the assembly.</summary>
+        private bool InPartEdit()
+        {
+            try
+            {
+                object edit = _app.ActiveEditObject;
+                return edit is PlanarSketch || edit is PartComponentDefinition || edit is PartDocument || edit is ComponentOccurrence;
+            }
+            catch { return false; }
         }
 
         // ----- transparency of finished parts -------------------------------------------------------------------

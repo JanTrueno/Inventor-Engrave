@@ -17,6 +17,7 @@ namespace Engrave.Core
         public const string SketchName = "GraveerSketch";
         private const string PlaneName = "GraveerVlak";
         private const string NewSuffix = " (new)";
+        private const string OldSuffix = " (old)";   // an engraving set aside until Done (removed) or Cancel (restored)
         private const string EngravedProperty = "Graveren";
 
         // ----- finding ------------------------------------------------------------------------------------------
@@ -162,12 +163,7 @@ namespace Engrave.Core
             }
 
             // the engraving is in the part now; what follows only tidies up, and failures are reported, not fatal
-            foreach (PartFeature f in Named(def, FeatureName))
-            {
-                try { f.Delete(false, false, false); } catch (Exception ex) { warnings.Add("Old engraving not removed: " + ex.Message); }
-            }
-            DeleteSketches(def, SketchName);
-            DeletePlanes(def, PlaneName);
+            try { SetAside(def); } catch (Exception ex) { warnings.Add("Old engraving not set aside: " + ex.Message); }
             try { feature.Name = FeatureName; } catch (Exception ex) { warnings.Add("Naming the engraving failed: " + ex.Message); }
             try { sketch.Name = SketchName; } catch (Exception ex) { warnings.Add("Naming the sketch failed: " + ex.Message); }
             foreach (WorkPlane wp in PlanesNamed(def, PlaneName + NewSuffix)) { try { wp.Name = PlaneName; } catch { } }
@@ -214,17 +210,135 @@ namespace Engrave.Core
             else try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
         }
 
-        /// <summary>Deletes the engraving, its sketch and work plane, and clears the "Graveren" iProperty.</summary>
+        /// <summary>
+        /// Removes the engraving from the part (set aside until Done, so Cancel can bring it back) and clears the
+        /// "Graveren" iProperty.
+        /// </summary>
         public static void Delete(PartDocument part, List<string> warnings)
         {
             PartComponentDefinition def = part.ComponentDefinition;
-            foreach (PartFeature f in Named(def, FeatureName)) f.Delete(false, false, false);
-            DeleteSketches(def, SketchName);
             DeleteSketches(def, SketchName + NewSuffix);
-            DeletePlanes(def, PlaneName);
             DeletePlanes(def, PlaneName + NewSuffix);
+            SetAside(def);
             SetEngravedProperty(part, false, warnings);
             try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
+        }
+
+        // ----- set aside until Done / Cancel --------------------------------------------------------------------
+
+        /// <summary>
+        /// Takes the current engraving out of the way. The first time in a run it is renamed "(old)" and suppressed, so
+        /// Cancel can bring it back; when an "(old)" one is already there, the current one was made in this run and is
+        /// deleted.
+        /// </summary>
+        private static void SetAside(PartComponentDefinition def)
+        {
+            bool haveOld = Named(def, FeatureName + OldSuffix).Count > 0;
+            foreach (PartFeature f in Named(def, FeatureName))
+            {
+                if (haveOld) { f.Delete(false, false, false); continue; }
+                try { f.Suppressed = true; } catch { }
+                f.Name = FeatureName + OldSuffix;
+                PlanarSketch sk = SketchOf(f);
+                if (sk != null) { try { sk.Name = SketchName + OldSuffix; } catch { } }
+                if (sk?.PlanarEntity is WorkPlane wp) { try { wp.Name = PlaneName + OldSuffix; } catch { } }
+            }
+            if (haveOld)
+            {
+                DeleteSketches(def, SketchName);
+                DeletePlanes(def, PlaneName);
+            }
+            else
+            {
+                // sketches and planes left without a feature (an emptied sketch, for example) go aside with it
+                foreach (PlanarSketch sk in SketchesNamed(def, SketchName)) { try { sk.Name = SketchName + OldSuffix; } catch { } }
+                foreach (WorkPlane wp in PlanesNamed(def, PlaneName)) { try { wp.Name = PlaneName + OldSuffix; } catch { } }
+            }
+        }
+
+        /// <summary>Done: what was set aside in this run is removed for good.</summary>
+        public static void Commit(PartDocument part)
+        {
+            PartComponentDefinition def = part.ComponentDefinition;
+            foreach (PartFeature f in Named(def, FeatureName + OldSuffix)) { try { f.Delete(false, false, false); } catch { } }
+            DeleteSketches(def, SketchName + OldSuffix);
+            DeletePlanes(def, PlaneName + OldSuffix);
+        }
+
+        /// <summary>
+        /// Cancel: puts the part back as it was before the run. What this run made is removed and what it set aside
+        /// comes back; an engraving that was only edited gets its text boxes back from <paramref name="before"/>.
+        /// </summary>
+        public static void Revert(PartDocument part, bool hadEngraving, List<TextState> before, List<string> warnings)
+        {
+            PartComponentDefinition def = part.ComponentDefinition;
+            DeleteSketches(def, SketchName + NewSuffix);
+            DeletePlanes(def, PlaneName + NewSuffix);
+            bool haveOld = Named(def, FeatureName + OldSuffix).Count > 0 || SketchesNamed(def, SketchName + OldSuffix).Count > 0;
+            if (haveOld || !hadEngraving)
+            {
+                foreach (PartFeature f in Named(def, FeatureName)) { try { f.Delete(false, false, false); } catch { } }
+                DeleteSketches(def, SketchName);
+                DeletePlanes(def, PlaneName);
+            }
+            if (haveOld)
+            {
+                foreach (WorkPlane wp in PlanesNamed(def, PlaneName + OldSuffix)) { try { wp.Name = PlaneName; } catch { } }
+                foreach (PlanarSketch sk in SketchesNamed(def, SketchName + OldSuffix)) { try { sk.Name = SketchName; } catch { } }
+                foreach (PartFeature f in Named(def, FeatureName + OldSuffix))
+                {
+                    try { f.Name = FeatureName; } catch { }
+                    try { f.Suppressed = false; } catch { }
+                }
+            }
+            if (hadEngraving && before != null) Restore(Find(part), before, warnings);
+            SetEngravedProperty(part, Find(part) != null, warnings);
+            try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
+        }
+
+        /// <summary>Text, place and angle of the text boxes of an engraving, to put back after an edit.</summary>
+        internal sealed class TextState
+        {
+            public string FormattedText;
+            public double X, Y, Rotation;
+        }
+
+        public static List<TextState> Snapshot(PartFeature f)
+        {
+            var list = new List<TextState>();
+            PlanarSketch sketch = SketchOf(f);
+            if (sketch == null) return list;
+            foreach (TextBox t in sketch.TextBoxes)
+            {
+                try { list.Add(new TextState { FormattedText = t.FormattedText, X = t.Origin.X, Y = t.Origin.Y, Rotation = t.Rotation }); }
+                catch { }
+            }
+            return list;
+        }
+
+        private static void Restore(PartFeature f, List<TextState> before, List<string> warnings)
+        {
+            PlanarSketch sketch = SketchOf(f);
+            if (sketch == null || before.Count == 0) return;
+            if (sketch.TextBoxes.Count != before.Count)
+            {
+                warnings.Add("The text of the engraving could not be put back (text boxes were added or removed).");
+                return;
+            }
+            for (int i = 0; i < before.Count; i++)
+            {
+                TextBox t = sketch.TextBoxes[i + 1];
+                try
+                {
+                    t.FormattedText = before[i].FormattedText;
+                    t.Rotation = before[i].Rotation;
+                    Point2d o = t.Origin;
+                    o.X = before[i].X;
+                    o.Y = before[i].Y;
+                    t.Origin = o;
+                }
+                catch (Exception ex) { warnings.Add("Putting the text back failed: " + ex.Message); }
+            }
         }
 
         // ----- helpers ------------------------------------------------------------------------------------------
@@ -248,11 +362,16 @@ namespace Engrave.Core
             return list;
         }
 
-        private static void DeleteSketches(PartComponentDefinition def, string name)
+        private static List<PlanarSketch> SketchesNamed(PartComponentDefinition def, string name)
         {
             var list = new List<PlanarSketch>();
             foreach (PlanarSketch s in def.Sketches) if (s.Name == name) list.Add(s);
-            foreach (PlanarSketch s in list) { try { s.Delete(); } catch { } }
+            return list;
+        }
+
+        private static void DeleteSketches(PartComponentDefinition def, string name)
+        {
+            foreach (PlanarSketch s in SketchesNamed(def, name)) { try { s.Delete(); } catch { } }
         }
 
         private static List<WorkPlane> PlanesNamed(PartComponentDefinition def, string name)
