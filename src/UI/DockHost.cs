@@ -19,6 +19,19 @@ namespace Engrave.UI
 
         private static DockableWindow _window;
         private static HostControl _host;
+        private static DockableWindowsEvents _events;
+        private static bool _hiding;   // true while the add-in hides the window itself
+
+        /// <summary>
+        /// The user closed the window (the cross on its tab) while a panel was in it. Inventor does not offer to keep
+        /// that cross away when the window is docked as a tab, so the command is told instead.
+        /// </summary>
+        public static event Action Closed;
+
+        public static bool Visible
+        {
+            get { try { return _window?.Visible == true; } catch { return false; } }
+        }
 
         public static void Init(Inventor.Application app, string clientGuid)
         {
@@ -33,6 +46,24 @@ namespace Engrave.UI
             _window.AddChild(_host.Handle.ToInt32());
             _window.DockingState = DockingStateEnum.kDockLeft;
             _window.Visible = false;
+
+            _events = app.UserInterfaceManager.DockableWindows.Events;
+            _events.OnHide += OnHide;
+        }
+
+        private static void OnHide(DockableWindow window, EventTimingEnum timing, NameValueMap context, out HandlingCodeEnum handling)
+        {
+            handling = HandlingCodeEnum.kEventNotHandled;
+            if (timing != EventTimingEnum.kAfter || _hiding || _host == null || _host.Controls.Count == 0) return;
+            bool ours;
+            try { ours = window?.InternalName == WindowName; } catch { ours = false; }
+            if (ours) Closed?.Invoke();
+        }
+
+        /// <summary>Brings the window back, for example after its cross was clicked but the command goes on.</summary>
+        public static void Reshow()
+        {
+            try { if (_window != null && !_window.Visible) _window.Visible = true; } catch { }
         }
 
         public static void Show(Control panel, string title)
@@ -47,13 +78,17 @@ namespace Engrave.UI
 
         public static void Hide(Control panel)
         {
+            _hiding = true;
             try { if (_window != null) _window.Visible = false; } catch { }
+            finally { _hiding = false; }
             try { _host?.Controls.Remove(panel); } catch { }
             try { panel?.Dispose(); } catch { }
         }
 
         public static void Shutdown()
         {
+            try { if (_events != null) _events.OnHide -= OnHide; } catch { }
+            _events = null;
             try { _window?.Delete(); } catch { }
             try { _host?.Dispose(); } catch { }
             _window = null;

@@ -104,7 +104,11 @@ namespace Engrave.UI
         /// <summary>Starts the command on the active document; returns an error message, or null.</summary>
         public static string Start(Inventor.Application app)
         {
-            if (_active != null) return "Engrave is already running. Click Done in its panel first.";
+            if (_active != null)
+            {
+                DockHost.Reshow();   // its panel may have been closed with the cross on its tab
+                return null;
+            }
             Document doc = app.ActiveDocument;
             if (!(doc is AssemblyDocument) && !(doc is PartDocument) && !(doc is DrawingDocument))
                 return "Open an assembly, a part or a drawing first.";
@@ -222,6 +226,7 @@ namespace Engrave.UI
 
             _appEvents = _app.ApplicationEvents;
             _appEvents.OnCloseDocument += OnCloseDocument;
+            DockHost.Closed += OnPanelClosed;
 
             DockHost.Show(_panel, "Engrave");
             ShowOrderHint();
@@ -876,6 +881,30 @@ namespace Engrave.UI
 
         // ----- end ----------------------------------------------------------------------------------------------
 
+        /// <summary>
+        /// The cross on the panel tab: ask what to do, a moment later (Inventor is still busy hiding the window). Keep
+        /// is Done, Put back is Cancel, and anything else brings the panel back.
+        /// </summary>
+        private void OnPanelClosed()
+        {
+            if (_finished) return;
+            var later = new Timer { Interval = 150 };
+            later.Tick += (s, e) =>
+            {
+                later.Stop();
+                later.Dispose();
+                if (_finished || DockHost.Visible) return;
+                if (_changes == 0 && _mode == PanelMode.Picking) { Finish(true, false); return; }
+                DialogResult answer = MessageBox.Show(_owner,
+                    "Close Engrave?\n\nYes: keep the changes (like Done).\nNo: put everything back (like Cancel).\nCancel: go on engraving.",
+                    "Engrave", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button3);
+                if (answer == DialogResult.Yes) Finish(true, false);
+                else if (answer == DialogResult.No) Finish(false, true);
+                else DockHost.Reshow();
+            };
+            later.Start();
+        }
+
         private void OnCloseDocument(_Document doc, string fullName, EventTimingEnum timing, NameValueMap context, out HandlingCodeEnum handling)
         {
             handling = HandlingCodeEnum.kEventNotHandled;
@@ -902,6 +931,7 @@ namespace Engrave.UI
             StopPicking();
             try { _appEvents.OnCloseDocument -= OnCloseDocument; } catch { }
             try { _input.OnActivateCommand -= OnActivateCommand; } catch { }
+            DockHost.Closed -= OnPanelClosed;
             try { _hiPart?.Delete(); } catch { }
             try { _hiFaces?.Delete(); } catch { }
             ReturnToTop();
