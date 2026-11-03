@@ -41,10 +41,11 @@ namespace Engrave.UI
         private bool _loading;
         private PanelMode _mode = PanelMode.Picking;
 
-        // order number
-        private readonly CheckBox _includeOrder = new CheckBox { Text = "Include in the text", AutoSize = true };
-        private readonly FieldBox _order;
-        private readonly Label _orderHint = new Label { AutoSize = true, Tag = "keep" };
+        // iProperty in front of the part name (for example an order number)
+        private readonly CheckBox _includeProp = new CheckBox { Text = "Put an iProperty in front of the name", AutoSize = true };
+        private readonly FieldBox _propName, _propValue;
+        private Control _textHeader, _textBody;
+        private readonly Label _propHint = new Label { AutoSize = true, Tag = "keep" };
 
         // engraving
         private readonly ListView _parts = NewList();
@@ -59,13 +60,14 @@ namespace Engrave.UI
         private readonly Label _existingInfo = new Label { AutoSize = true, Tag = "keep" };
 
         // settings
-        private readonly FieldBox _depth, _height, _maxChars;
+        private readonly FieldBox _depth, _height, _maxChars, _placeholder;
         private readonly CheckBox _topInside = new CheckBox { Text = "Top is the inside of the bends", AutoSize = true };
 
         private readonly Label _status = new Label { AutoSize = false, Dock = DockStyle.Bottom, Height = 48, Padding = new Padding(8, 2, 8, 0), Tag = "keep", Visible = false };
         private readonly InventorButton _primary, _secondary, _skip;
 
         public event Action OrderChanged;
+        public event Action PropertyNameChanged;
         public event Action TextEdited;
         public event Action<int> PartChosen;
         public event Action PickClicked;
@@ -87,7 +89,9 @@ namespace Engrave.UI
             ForeColor = theme.Text;
             Dock = DockStyle.Fill;
 
-            _order = new FieldBox(theme);
+            _propName = new FieldBox(theme);
+            _propValue = new FieldBox(theme);
+            _placeholder = new FieldBox(theme);
             _text = new FieldBox(theme);
             _pick = new SelectorField(theme);
             _depth = new FieldBox(theme);
@@ -102,7 +106,7 @@ namespace Engrave.UI
             theme.Apply(this);
             _parts.BackColor = _existing.BackColor = theme.Field;
             _parts.ForeColor = _existing.ForeColor = theme.Text;
-            _info.ForeColor = _orderHint.ForeColor = _existingInfo.ForeColor = theme.Dim;
+            _info.ForeColor = _propHint.ForeColor = _existingInfo.ForeColor = theme.Dim;
             WireEvents();
             _pick.SetValue("", false);
             SetMode(PanelMode.Picking, assembly);
@@ -114,29 +118,50 @@ namespace Engrave.UI
             HeaderStyle = ColumnHeaderStyle.None, OwnerDraw = true, BorderStyle = BorderStyle.None
         };
 
-        // ----- order number -------------------------------------------------------------------------------------
+        // ----- iProperty in front of the name -------------------------------------------------------------------
 
-        public void SetOrder(bool include, string order)
+        public void SetProperty(bool include, string name, string value)
         {
             _loading = true;
-            _includeOrder.Checked = include;
-            _order.Text = order ?? "";
+            _includeProp.Checked = include;
+            _propName.Text = name ?? "";
+            _propValue.Text = value ?? "";
             _loading = false;
             UpdateOrderRow();
         }
 
-        public bool IncludeOrder => _includeOrder.Checked;
-        public string Order => _order.Text.Trim();
-
-        /// <summary>Shows what is engraved of the order number, or why it cannot be used.</summary>
-        public void SetOrderHint(string text, bool isError)
+        /// <summary>Shows the value read for a newly typed iProperty name.</summary>
+        public void SetPropertyValue(string value)
         {
-            _orderHint.Text = text ?? "";
-            _orderHint.ForeColor = isError ? ErrorColor : _theme.Dim;
-            _order.Invalid = isError;
+            _loading = true;
+            _propValue.Text = value ?? "";
+            _loading = false;
         }
 
-        private void UpdateOrderRow() => ShowRow(_order, _includeOrder.Checked);
+        public bool IncludeProperty => _includeProp.Checked;
+        public string PropertyName => _propName.Text.Trim();
+        public string PropertyValue => _propValue.Text.Trim();
+
+        /// <summary>The Text section is hidden in a drawing, where the text is always "part number - sheet".</summary>
+        public void ShowTextOptions(bool visible)
+        {
+            if (_textHeader != null) _textHeader.Visible = visible;
+            if (_textBody != null) _textBody.Visible = visible;
+        }
+
+        /// <summary>Shows what goes in front of the name, or why the value cannot be used.</summary>
+        public void SetOrderHint(string text, bool isError)
+        {
+            _propHint.Text = text ?? "";
+            _propHint.ForeColor = isError ? ErrorColor : _theme.Dim;
+            _propValue.Invalid = isError;
+        }
+
+        private void UpdateOrderRow()
+        {
+            ShowRow(_propName, _includeProp.Checked);
+            ShowRow(_propValue, _includeProp.Checked);
+        }
 
         // ----- engraving ----------------------------------------------------------------------------------------
 
@@ -216,6 +241,7 @@ namespace Engrave.UI
             _height.Text = s.TextHeightMm > 0 ? EngraveSettings.Format(s.TextHeightMm) : "";
             _maxChars.IntValue = s.MaxPartChars;
             _topInside.Checked = s.TopIsInsideOfBends;
+            _placeholder.Text = s.PlaceholderValue ?? "";
             _loading = false;
         }
 
@@ -236,7 +262,9 @@ namespace Engrave.UI
             }
             s.MaxPartChars = _maxChars.IntValue;
             s.TopIsInsideOfBends = _topInside.Checked;
-            s.IncludeOrderNumber = _includeOrder.Checked;
+            s.IncludeProperty = _includeProp.Checked;
+            if (PropertyName.Length > 0) s.PropertyName = PropertyName;
+            s.PlaceholderValue = _placeholder.Text.Trim();
             return error;
         }
 
@@ -255,7 +283,7 @@ namespace Engrave.UI
             _secondary.Text = "Cancel";
             _secondary.Visible = picking || mode == PanelMode.Sketching;
             _skip.Visible = picking && canSkip;
-            foreach (Control c in new Control[] { _includeOrder, _order, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
+            foreach (Control c in new Control[] { _includeProp, _propName, _propValue, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
                 c.Enabled = picking;
             UpdateExistingButtons();
             _primary.Invalidate();
@@ -279,7 +307,8 @@ namespace Engrave.UI
         {
             var stack = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            AddSection(stack, "Text", OrderTable(), true);
+            _textBody = OrderTable();
+            _textHeader = AddSection(stack, "Text", _textBody, true);
             AddSection(stack, "Engrave", EngraveTable(), true);
             AddSection(stack, "Existing Engravings", ExistingTable(), true);
             AddSection(stack, "Settings", SettingsTable(), false);
@@ -301,7 +330,7 @@ namespace Engrave.UI
             Controls.Add(buttons);
         }
 
-        private void AddSection(TableLayoutPanel stack, string title, Control body, bool open)
+        private SectionHeader AddSection(TableLayoutPanel stack, string title, Control body, bool open)
         {
             var header = new SectionHeader(_theme, title, open) { Font = Font, Dock = DockStyle.Fill, Margin = Padding.Empty };
             body.Dock = DockStyle.Fill;
@@ -314,6 +343,7 @@ namespace Engrave.UI
             r = stack.RowCount++;
             stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             stack.Controls.Add(body, 0, r);
+            return header;
         }
 
         private static TableLayoutPanel Table()
@@ -327,9 +357,10 @@ namespace Engrave.UI
         private TableLayoutPanel OrderTable()
         {
             var t = Table();
-            Wide(t, _includeOrder);
-            Row(t, "Order", _order);
-            Wide(t, _orderHint);
+            Wide(t, _includeProp);
+            Row(t, "iProperty", _propName);
+            Row(t, "Value", _propValue);
+            Wide(t, _propHint);
             Row(t, "Name length", _maxChars);
             var hint = new Label { Text = "The most characters of the part name (part number) that are engraved.", AutoSize = false, Height = 32, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, hint);
@@ -387,7 +418,8 @@ namespace Engrave.UI
             Row(t, "Depth (mm)", _depth);
             Row(t, "Height (mm)", _height);
             Wide(t, _topInside);
-            var hint = new Label { Text = "Empty height: Inventor's default text size. The depth is never more than a quarter of the sheet thickness.", AutoSize = false, Height = 46, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
+            Row(t, "Placeholder", _placeholder);
+            var hint = new Label { Text = "Empty height: Inventor's default text size. The depth is never more than a quarter of the sheet thickness. Placeholder: an iProperty value that means \"not filled in yet\" (for example 160100); such a value is refused.", AutoSize = false, Height = 92, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, hint);
             return t;
         }
@@ -467,8 +499,9 @@ namespace Engrave.UI
 
         private void WireEvents()
         {
-            _includeOrder.CheckedChanged += (s, e) => { UpdateOrderRow(); if (!_loading) OrderChanged?.Invoke(); };
-            _order.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
+            _includeProp.CheckedChanged += (s, e) => { UpdateOrderRow(); if (!_loading) OrderChanged?.Invoke(); };
+            _propValue.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
+            _propName.TextChanged += (s, e) => { if (!_loading) PropertyNameChanged?.Invoke(); };
             _text.TextChanged += (s, e) => { if (!_loading) { _text.Invalid = false; TextEdited?.Invoke(); } };
             _parts.SelectedIndexChanged += (s, e) =>
             {
@@ -484,7 +517,7 @@ namespace Engrave.UI
             _delete.Click += (s, e) => { int i = SelectedExisting(); if (i >= 0) DeleteRequested?.Invoke(i); };
             _deleteAll.Click += (s, e) => DeleteAllRequested?.Invoke();
 
-            foreach (FieldBox box in new[] { _depth, _height, _maxChars })
+            foreach (FieldBox box in new[] { _depth, _height, _maxChars, _placeholder })
                 box.TextChanged += (s, e) => { if (!_loading) SettingsChanged?.Invoke(); };
             _topInside.CheckedChanged += (s, e) => { if (!_loading) SettingsChanged?.Invoke(); };
 

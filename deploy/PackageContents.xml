@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="Inventor" Name="Engrave" Description="Engrave the part number and order number into sheet metal parts" AppVersion="1.0.0" FriendlyVersion="1.0.0" ProductType="Application" SupportedLocales="Enu" AppNameSpace="local.engrave" Author="JanTrueno" ProductCode="{0486a3e9-d364-4bd2-b2e7-1033bae504e6}" UpgradeCode="{516c7a98-cca7-40b6-a85b-2ea2a9cabac4}">
+<ApplicationPackage SchemaVersion="1.0" AutodeskProduct="Inventor" Name="Engrave" Description="Engrave the part number (and an iProperty) into parts" AppVersion="1.0.0" FriendlyVersion="1.0.0" ProductType="Application" SupportedLocales="Enu" AppNameSpace="local.engrave" Author="JanTrueno" ProductCode="{0486a3e9-d364-4bd2-b2e7-1033bae504e6}" UpgradeCode="{516c7a98-cca7-40b6-a85b-2ea2a9cabac4}">
   <CompanyDetails Name="JanTrueno" />
   <RuntimeRequirements />
   <Components Description="Engrave for Inventor 2025">

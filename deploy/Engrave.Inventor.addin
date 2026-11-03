@@ -2,7 +2,7 @@
   <ClassId>{48c0d03d-510f-4800-a5a6-bb6e85513e11}</ClassId>
   <ClientId>{48c0d03d-510f-4800-a5a6-bb6e85513e11}</ClientId>
   <DisplayName>Engrave</DisplayName>
-  <Description>Engrave the part number and order number into sheet metal parts.</Description>
+  <Description>Engrave the part number (and an iProperty) into parts from an assembly, part or drawing.</Description>
   <Assembly>Engrave.dll</Assembly>
   <LoadOnStartUp>1</LoadOnStartUp>
   <UserUnloadable>1</UserUnloadable>

@@ -7,8 +7,8 @@ using Engrave.UI;
 namespace Engrave
 {
     /// <summary>
-    /// Inventor add-in entry point: one "Engrave" button on the Sheet Metal tab of the part ribbon and on the Assemble tab
-    /// of the assembly ribbon. It opens a panel docked in Inventor's left-hand area for engraving the part number (and
+    /// Inventor add-in entry point: one "Engrave" button on the Sheet Metal and 3D Model tabs of the part ribbon, the Assemble tab of the
+    /// assembly ribbon and the Place Views tab of the drawing ribbon. It opens a panel docked in Inventor's left-hand area for engraving the part number (and
     /// order number) into sheet metal parts, and for editing or deleting existing engravings.
     /// </summary>
     [ComVisible(true)]
@@ -33,8 +33,8 @@ namespace Engrave
 
             _button = _app.CommandManager.ControlDefinitions.AddButtonDefinition(
                 "Engrave", "Engrave.Start", CommandTypesEnum.kShapeEditCmdType, clientGuid,
-                "Engrave the part number into sheet metal parts",
-                "Engrave\nPuts the part number, and optionally the last four digits of the order number, as text on the top side of sheet metal parts and cuts it in shallowly. Also lists existing engravings for editing or deleting.",
+                "Engrave the part number into parts",
+                "Engrave\nPuts the part number, optionally after the value of an iProperty such as an order number, as text on a face of each part (the top side of sheet metal) and engraves it with Emboss. Works in parts, assemblies and drawings, and lists existing engravings for editing or deleting.",
                 Icons.CreateEngrave(16), Icons.CreateEngrave(32), ButtonDisplayEnum.kDisplayTextInLearningMode);
             _button.OnExecute += OnExecute;
 
@@ -68,7 +68,9 @@ namespace Engrave
         private void AddToRibbon()
         {
             AddTo("Part", "id_TabSheetMetal");
+            AddTo("Part", "id_TabModel");
             AddTo("Assembly", "id_TabAssemble");
+            AddTo("Drawing", "id_TabPlaceViews");
         }
 
         private void AddTo(string ribbonName, string tabName)

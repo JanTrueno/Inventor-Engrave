@@ -12,7 +12,8 @@ namespace Engrave.UI
     /// first (each part file once):
     /// the part is highlighted, its top side green, and a click on a face puts the text there as a sketch. The user then
     /// drags or turns the text in Inventor's sketch environment and clicks Finish Sketch, after which the shallow cut is
-    /// made and the next part is up. In a part the same is done for that part. The panel also lists the existing
+    /// made and the next part is up. In a part the same is done for that part. In a drawing every sheet is one row: the
+    /// part of its first view is opened, and the text is "part number - sheet number". The panel also lists the existing
     /// engravings for editing or deleting. Cancel undoes everything done since the command started. Nothing is saved.
     /// </summary>
     internal sealed class EngraveCommand
@@ -27,6 +28,8 @@ namespace Engrave.UI
             public string Name;
             public bool Visible = true;
             public bool SheetMetal;
+            public int Sheet;   // drawing mode: the sheet number, 0 otherwise
+            public string Label => Sheet > 0 ? "Sheet " + Sheet + " \u00B7 " + Name : Name;
             public TopSide Side;
             public string Text;
             public bool TextEdited, Done, Skipped;
@@ -38,6 +41,8 @@ namespace Engrave.UI
         private readonly Document _top;
         private readonly string _topName;
         private readonly AssemblyDocument _asm;
+        private readonly DrawingDocument _drawing;
+        private readonly List<Document> _opened = new List<Document>();   // parts this command opened a window for
         private readonly InventorWindow _owner;
         private readonly List<Item> _items = new List<Item>();
         private readonly List<int> _walk = new List<int>();   // the items the panel's part list shows (the visible ones)
@@ -66,6 +71,7 @@ namespace Engrave.UI
             _app = app;
             _top = top;
             _asm = top as AssemblyDocument;
+            _drawing = top as DrawingDocument;
             _owner = new InventorWindow(app.MainFrameHWND);
             try { _topName = top.FullDocumentName; } catch { _topName = ""; }
         }
@@ -80,8 +86,8 @@ namespace Engrave.UI
         {
             if (_active != null) return "Engrave is already running. Click Done in its panel first.";
             Document doc = app.ActiveDocument;
-            if (!(doc is AssemblyDocument) && !(doc is PartDocument))
-                return "Open an assembly or a part first.";
+            if (!(doc is AssemblyDocument) && !(doc is PartDocument) && !(doc is DrawingDocument))
+                return "Open an assembly, a part or a drawing first.";
 
             var cmd = new EngraveCommand(app, doc);
             string error = cmd.Collect();
@@ -107,6 +113,7 @@ namespace Engrave.UI
         /// </summary>
         private string Collect()
         {
+            if (_drawing != null) return CollectSheets();
             if (_top is PartDocument part)
             {
                 if (!Modifiable(part)) return "This part is read-only (a library or Content Center part) and cannot be engraved.";
@@ -141,6 +148,27 @@ namespace Engrave.UI
             return null;
         }
 
+        /// <summary>Drawing mode: one item per sheet, for the part shown in its first view (other sheets are left out).</summary>
+        private string CollectSheets()
+        {
+            int number = 0;
+            foreach (Sheet sheet in _drawing.Sheets)
+            {
+                number++;
+                try
+                {
+                    if (sheet.DrawingViews.Count == 0) continue;
+                    if (!(sheet.DrawingViews[1].ReferencedDocumentDescriptor.ReferencedDocument is PartDocument p)) continue;
+                    if (!Modifiable(p)) continue;
+                    _items.Add(new Item { Part = p, Name = EngraveText.PartName(p), Sheet = number, SheetMetal = p.ComponentDefinition is SheetMetalComponentDefinition });
+                }
+                catch { /* view without a readable part */ }
+            }
+            if (_items.Count == 0) return "No sheet in this drawing shows a part that can be engraved.";
+            for (int i = 0; i < _items.Count; i++) _walk.Add(i);
+            return null;
+        }
+
         private static bool Modifiable(PartDocument part)
         {
             try { return ((Document)part).IsModifiable; } catch { return true; }
@@ -148,11 +176,13 @@ namespace Engrave.UI
 
         private void Run()
         {
-            _panel = new EngravePanel(Theme.Detect(_app), _asm != null);
+            _panel = new EngravePanel(Theme.Detect(_app), _asm != null || _drawing != null);
+            if (_drawing != null) _panel.ShowTextOptions(false);   // the drawing text is fixed: part number - sheet
             _panel.LoadSettings(_settings);
-            _panel.SetOrder(_settings.IncludeOrderNumber, EngraveText.ReadOrder(_top));
+            _panel.SetProperty(_settings.IncludeProperty, _settings.PropertyName, EngraveText.ReadProperty(_top, _settings.PropertyName));
 
             _panel.OrderChanged += OnOrderChanged;
+            _panel.PropertyNameChanged += OnPropertyNameChanged;
             _panel.TextEdited += OnTextEdited;
             _panel.PartChosen += k => Choose(_walk[k]);
             _panel.PickClicked += () => { if (_events == null) StartPicking(); else StopPicking(); };
@@ -163,8 +193,7 @@ namespace Engrave.UI
             _panel.DeleteAllRequested += OnDeleteAll;
             _panel.SettingsChanged += OnSettingsChanged;
 
-            _hiPart = CreateHighlightSet(255, 140, 0);
-            _hiFaces = CreateHighlightSet(0, 200, 0);
+            if (_drawing == null) CreateHighlightSets(_top);
             _wait.Tick += (s, e) => { if (!InSketch()) SketchClosed(); };
             _panel.TertiaryClicked += OnSkip;
             try { _start = _app.TransactionManager.SetCheckPoint(); }
@@ -180,11 +209,36 @@ namespace Engrave.UI
             else _panel.SetStatus("All parts are hidden; their engravings are listed below.", false);
         }
 
-        private HighlightSet CreateHighlightSet(int r, int g, int b)
+        /// <summary>The orange (part) and green (top side) highlights, in the document the user picks in.</summary>
+        private void CreateHighlightSets(Document doc)
         {
-            HighlightSet set = _asm != null ? _asm.CreateHighlightSet() : ((PartDocument)_top).CreateHighlightSet();
-            set.Color = _app.TransientObjects.CreateColor((byte)r, (byte)g, (byte)b);
-            return set;
+            try { _hiPart?.Delete(); } catch { }
+            try { _hiFaces?.Delete(); } catch { }
+            _hiPart = Create(255, 140, 0);
+            _hiFaces = Create(0, 200, 0);
+
+            HighlightSet Create(int r, int g, int b)
+            {
+                HighlightSet set = doc is AssemblyDocument a ? a.CreateHighlightSet() : ((PartDocument)doc).CreateHighlightSet();
+                set.Color = _app.TransientObjects.CreateColor((byte)r, (byte)g, (byte)b);
+                return set;
+            }
+        }
+
+        /// <summary>
+        /// Drawing mode: opens the part of the item in its own window (or brings it to the front), so its faces can be
+        /// picked. The windows this command opened are closed again at the end; the parts stay loaded through the drawing.
+        /// </summary>
+        private void ShowPart(Item item)
+        {
+            if (_drawing == null) return;
+            var doc = (Document)item.Part;
+            bool hadWindow = false;
+            try { hadWindow = doc.Views.Count > 0; } catch { }
+            var shown = (Document)_app.Documents.Open(doc.FullFileName, true);
+            try { shown.Activate(); } catch { }
+            if (!hadWindow && !_opened.Contains(shown)) _opened.Add(shown);
+            CreateHighlightSets(shown);
         }
 
         // ----- the part being engraved --------------------------------------------------------------------------
@@ -195,6 +249,13 @@ namespace Engrave.UI
             StopPicking();
             _current = index;
             Item item = _items[index];
+            try { ShowPart(item); }
+            catch (Exception ex)
+            {
+                _panel.SetStatus("Could not open " + item.Name + ": " + ex.Message, true);
+                RefreshParts();
+                return;
+            }
             if (item.Side == null) item.Side = TopSide.Find(item.Part, _settings.TopIsInsideOfBends);
             if (!item.TextEdited) item.Text = ComposeText(item);
             _panel.SetText(item.Text);
@@ -207,12 +268,14 @@ namespace Engrave.UI
             StartPicking();
         }
 
-        private string ComposeText(Item item) =>
-            EngraveText.Compose(_panel.IncludeOrder ? _panel.Order : "", item.Part, _settings.MaxPartChars);
+        private string ComposeText(Item item) => item.Sheet > 0
+            ? EngraveText.PartName(item.Part) + " - " + item.Sheet
+            : EngraveText.Compose(_panel.IncludeProperty ? _panel.PropertyValue : "", item.Part, _settings.MaxPartChars);
 
         /// <summary>The part in orange; its top side in green on top of that, so it is clear where to click.</summary>
         private void Highlight(Item item)
         {
+            if (_hiPart == null || _hiFaces == null) return;
             try
             {
                 _hiPart.Clear();
@@ -261,7 +324,7 @@ namespace Engrave.UI
                 Item item = _items[i];
                 bool engraved = Engraver.Find(item.Part) != null;
                 string status = item.Done ? "Engraved" : item.Skipped ? "Skipped" : engraved ? "Engraved before" : item.SheetMetal ? "" : "Not sheet metal";
-                rows.Add(new PartRow { Name = item.Name, Status = status, Done = item.Done && engraved, Engraved = engraved });
+                rows.Add(new PartRow { Name = item.Label, Status = status, Done = item.Done && engraved, Engraved = engraved });
             }
             _panel.SetParts(rows, _walk.IndexOf(_current));
         }
@@ -269,8 +332,10 @@ namespace Engrave.UI
         private void RefreshExisting()
         {
             var rows = new List<EngravingRow>();
+            var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // a part on several sheets is listed once
             for (int i = 0; i < _items.Count; i++)
             {
+                if (!listed.Add(((Document)_items[i].Part).FullFileName)) continue;
                 PartFeature f = Engraver.Find(_items[i].Part);
                 if (f == null) continue;
                 bool suppressed = false;
@@ -278,28 +343,38 @@ namespace Engrave.UI
                 rows.Add(new EngravingRow
                 {
                     Part = i, Text = Engraver.TextOf(f), Suppressed = suppressed,
-                    Name = _items[i].Name + (_items[i].Visible ? "" : " (hidden)")
+                    Name = _items[i].Label + (_items[i].Visible ? "" : " (hidden)")
                 });
             }
             _panel.SetExisting(rows);
         }
 
-        // ----- order number, text and settings ------------------------------------------------------------------
+        // ----- iProperty in front, text and settings ------------------------------------------------------------
 
+        /// <summary>The iProperty value may be used: it is off, or it is not the placeholder for "not filled in".</summary>
         private bool OrderValid()
         {
-            if (!_panel.IncludeOrder) return true;
-            return !EngraveText.IsPlaceholder(_panel.Order);
+            if (_drawing != null || !_panel.IncludeProperty) return true;
+            return !EngraveText.IsPlaceholder(_panel.PropertyValue, _settings.PlaceholderValue);
         }
 
         private void ShowOrderHint()
         {
-            if (!_panel.IncludeOrder) _panel.SetOrderHint("", false);
-            else if (EngraveText.IsPlaceholder(_panel.Order))
-                _panel.SetOrderHint("160100 means the order number is not filled in yet. Type the right one.", true);
-            else if (EngraveText.ShortOrder(_panel.Order).Length == 0)
-                _panel.SetOrderHint("No order number: the text is the part number only.", false);
-            else _panel.SetOrderHint("Engraved as " + EngraveText.ShortOrder(_panel.Order) + " (the last four digits).", false);
+            if (!_panel.IncludeProperty) _panel.SetOrderHint("", false);
+            else if (_panel.PropertyName.Length == 0)
+                _panel.SetOrderHint("Type the name of the iProperty, for example an order number property.", false);
+            else if (EngraveText.IsPlaceholder(_panel.PropertyValue, _settings.PlaceholderValue))
+                _panel.SetOrderHint(_settings.PlaceholderValue + " means “" + _panel.PropertyName + "” is not filled in yet. Type the right value.", true);
+            else if (_panel.PropertyValue.Length == 0)
+                _panel.SetOrderHint("“" + _panel.PropertyName + "” is empty here: the text is the part number only.", false);
+            else _panel.SetOrderHint("The value is put in front of the part number.", false);
+        }
+
+        /// <summary>A new iProperty name: read its value from the open assembly or part.</summary>
+        private void OnPropertyNameChanged()
+        {
+            _panel.SetPropertyValue(EngraveText.ReadProperty(_top, _panel.PropertyName));
+            OnOrderChanged();
         }
 
         private void OnOrderChanged()
@@ -335,7 +410,7 @@ namespace Engrave.UI
         {
             bool topInside = _settings.TopIsInsideOfBends;
             if (_panel.ReadSettings(_settings) != null) return;
-            RecomposeTexts();
+            OnOrderChanged();   // the placeholder or the name length may have changed
             if (topInside != _settings.TopIsInsideOfBends)
             {
                 foreach (Item item in _items) item.Side = null;
@@ -351,7 +426,7 @@ namespace Engrave.UI
             if (!OrderValid())
             {
                 _panel.SetPick(false, "");
-                _panel.SetStatus("Fill in the order number, or untick \"Include in the text\".", true);
+                _panel.SetStatus("Fill in the iProperty value, or untick the iProperty.", true);
                 return;
             }
             _events = _app.CommandManager.CreateInteractionEvents();
@@ -527,7 +602,7 @@ namespace Engrave.UI
             }
             else
             {
-                Transaction tx = _app.TransactionManager.StartTransaction((_Document)_top, mode == PanelMode.Sketching ? "Engrave" : "Edit Engraving");
+                Transaction tx = _app.TransactionManager.StartTransaction(UndoDocument(item), mode == PanelMode.Sketching ? "Engrave" : "Edit Engraving");
                 try
                 {
                     if (mode == PanelMode.Sketching)
@@ -572,6 +647,9 @@ namespace Engrave.UI
             _panel.SetStatus(status, isError);
             if (_current >= 0) { Highlight(_items[_current]); StartPicking(); }
         }
+
+        /// <summary>The document whose undo list gets the step: the part itself in drawing mode, else the open document.</summary>
+        private _Document UndoDocument(Item item) => _drawing != null ? (_Document)item.Part : (_Document)_top;
 
         private void Report(Item item, List<string> warnings)
         {
@@ -621,6 +699,8 @@ namespace Engrave.UI
             if (sketch == null) { _panel.SetStatus("The text sketch of this engraving cannot be found.", true); return; }
             StopPicking();
             _current = index;
+            try { ShowPart(item); }
+            catch (Exception ex) { _panel.SetStatus("Could not open " + item.Name + ": " + ex.Message, true); return; }
             if (item.Side == null) item.Side = TopSide.Find(item.Part, _settings.TopIsInsideOfBends);
             Highlight(item);
             RefreshParts();
@@ -652,9 +732,12 @@ namespace Engrave.UI
         {
             if (_mode != PanelMode.Picking) return;
             var engraved = new List<Item>();
-            foreach (Item item in _items) if (Engraver.Find(item.Part) != null) engraved.Add(item);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // a part on several sheets once
+            foreach (Item item in _items)
+                if (seen.Add(((Document)item.Part).FullFileName) && Engraver.Find(item.Part) != null) engraved.Add(item);
             if (engraved.Count == 0) return;
-            string what = _asm == null ? "the engraving of this part" : "the engravings of all " + engraved.Count + " parts in this assembly";
+            string what = _asm == null && _drawing == null ? "the engraving of this part"
+                        : "the engravings of all " + engraved.Count + " parts in this " + (_drawing != null ? "drawing" : "assembly");
             if (MessageBox.Show(_owner, "Delete " + what + "?", "Engrave",
                     MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK) return;
             DeleteEngravings(engraved, "Delete All Engravings");
@@ -666,7 +749,7 @@ namespace Engrave.UI
             StopPicking();
             var warnings = new List<string>();
             int deleted = 0;
-            Transaction tx = _app.TransactionManager.StartTransaction((_Document)_top, undoName);
+            Transaction tx = _app.TransactionManager.StartTransaction(items.Count == 1 ? UndoDocument(items[0]) : (_Document)_top, undoName);
             try
             {
                 foreach (Item item in items)
@@ -771,6 +854,18 @@ namespace Engrave.UI
         /// <summary>Leaves in-place editing of a part, so the assembly is active again at its top level.</summary>
         private void ReturnToTop()
         {
+            if (_drawing != null)
+            {
+                foreach (Document doc in _opened)
+                {
+                    var views = new List<Inventor.View>();
+                    try { foreach (Inventor.View v in doc.Views) views.Add(v); } catch { }
+                    foreach (Inventor.View v in views) { try { v.Close(); } catch (Exception ex) { Log.Write("Closing a part window failed: " + ex.Message); } }
+                }
+                _opened.Clear();
+                try { _drawing.Activate(); } catch { }
+                return;
+            }
             if (_asm == null || _editedOcc == null) return;
             try { _editedOcc.ExitEdit(ExitTypeEnum.kExitToTop); }
             catch (Exception ex)

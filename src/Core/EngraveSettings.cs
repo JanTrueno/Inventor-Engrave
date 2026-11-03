@@ -23,7 +23,14 @@ namespace Engrave.Core
         /// </summary>
         public bool TopIsInsideOfBends { get; set; } = true;
 
-        public bool IncludeOrderNumber { get; set; } = true;
+        /// <summary>Put the value of an iProperty (for example an order number) in front of the part name.</summary>
+        public bool IncludeProperty { get; set; }
+
+        /// <summary>The iProperty to put in front, by name; read from the open assembly or part.</summary>
+        public string PropertyName { get; set; } = "";
+
+        /// <summary>A value that means the iProperty is not filled in yet (for example 160100); refused when found. Empty: none.</summary>
+        public string PlaceholderValue { get; set; } = "";
 
         private static readonly JsonSerializerOptions Json = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
