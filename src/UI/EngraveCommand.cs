@@ -250,6 +250,7 @@ namespace Engrave.UI
             StopPicking();
             _current = index;
             Item item = _items[index];
+            SetTransparent(item, false);   // a finished part chosen again is solid while it is worked on
             try { ShowPart(item); }
             catch (Exception ex)
             {
@@ -649,6 +650,8 @@ namespace Engrave.UI
             }
             Report(item, warnings);
 
+            // back to the assembly at once, so the next part is highlighted and can be picked straight away
+            LeaveEdit();
             _panel.SetMode(PanelMode.Picking, _walk.Count > 1);
             RefreshExisting();
             if (engraved)
@@ -656,6 +659,7 @@ namespace Engrave.UI
                 item.Done = true;
                 item.Skipped = false;
                 _engraved++;
+                SetTransparent(item, true);   // finished parts fade out, so what is left stands out
                 _panel.SetStatus(status, false);
                 if (_walk.Count > 1) Advance();
                 else { RefreshParts(); StopPicking(); _panel.SetStatus(status + " Click Done to finish.", false); }
@@ -838,6 +842,7 @@ namespace Engrave.UI
             try { _hiPart?.Delete(); } catch { }
             try { _hiFaces?.Delete(); } catch { }
             ReturnToTop();
+            RestoreTransparency();
             if (undo && _changes > 0) UndoRun();
             try { _asm?.Update(); } catch { }
             try { _app.StatusBarText = ""; } catch { }
@@ -885,14 +890,70 @@ namespace Engrave.UI
                 try { _drawing.Activate(); } catch { }
                 return;
             }
+            LeaveEdit();
+        }
+
+        /// <summary>Assembly: leaves in-place editing of the last edited part, back to the top of the assembly.</summary>
+        private void LeaveEdit()
+        {
             if (_asm == null || _editedOcc == null) return;
-            try { _editedOcc.ExitEdit(ExitTypeEnum.kExitToTop); }
+            ComponentOccurrence occ = _editedOcc;
+            _editedOcc = null;
+            try { occ.ExitEdit(ExitTypeEnum.kExitToTop); }
             catch (Exception ex)
             {
                 Log.Write("ExitEdit failed: " + ex.Message);
                 try { _app.CommandManager.ControlDefinitions["AssemblyReturnToTopCmd"].Execute2(true); }
                 catch (Exception ex2) { Log.Write("Return to top failed: " + ex2.Message); }
             }
+        }
+
+        // ----- transparency of finished parts -------------------------------------------------------------------
+
+        private readonly List<ComponentOccurrence> _madeTransparent = new List<ComponentOccurrence>();
+
+        /// <summary>
+        /// Makes every occurrence of the part see-through (or solid again). Only occurrences this command made
+        /// see-through are turned back, and all of them are restored when the command ends.
+        /// </summary>
+        private void SetTransparent(Item item, bool on)
+        {
+            if (_asm == null) return;
+            try
+            {
+                if (on)
+                {
+                    foreach (ComponentOccurrence occ in _asm.ComponentDefinition.Occurrences.get_AllReferencedOccurrences(item.Part.ComponentDefinition))
+                    {
+                        try
+                        {
+                            if (occ.Transparent) continue;
+                            occ.Transparent = true;
+                            _madeTransparent.Add(occ);
+                        }
+                        catch { /* occurrence cannot be changed */ }
+                    }
+                }
+                else
+                {
+                    foreach (ComponentOccurrence occ in _madeTransparent.ToArray())
+                    {
+                        bool same;
+                        try { same = SameFile(occ.Definition.Document as Document, item.Part); } catch { same = false; }
+                        if (!same) continue;
+                        try { occ.Transparent = false; } catch { }
+                        _madeTransparent.Remove(occ);
+                    }
+                }
+                _app.ActiveView.Update();
+            }
+            catch (Exception ex) { Log.Write("Changing transparency failed: " + ex.Message); }
+        }
+
+        private void RestoreTransparency()
+        {
+            foreach (ComponentOccurrence occ in _madeTransparent) { try { occ.Transparent = false; } catch { } }
+            _madeTransparent.Clear();
         }
     }
 }
