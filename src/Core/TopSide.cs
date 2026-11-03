@@ -12,7 +12,7 @@ namespace Engrave.Core
     /// </summary>
     internal sealed class TopSide
     {
-        /// <summary>Transient keys of the flat faces that may be engraved.</summary>
+        /// <summary>Transient keys of the faces that may be engraved (flat or round); empty allows every such face.</summary>
         public readonly HashSet<int> Faces = new HashSet<int>();
         public string Info = "";
 
@@ -23,23 +23,25 @@ namespace Engrave.Core
 
         public static TopSide Find(PartDocument part, bool topIsInside)
         {
+            if (!(part.ComponentDefinition is SheetMetalComponentDefinition))
+                return new TopSide { Info = "Not sheet metal: any flat or round face can be picked. Text on a round face is wrapped onto it." };
             try { return Compute(part, topIsInside); }
             catch (Exception ex)
             {
                 Log.Write("Finding the top side of " + part.FullDocumentName + " failed: " + ex);
-                TopSide all = AllFlat(part);
-                all.Info = "Top side not found (" + ex.Message + "): every flat face can be picked.";
+                TopSide all = AllPickable(part);
+                all.Info = "Top side not found (" + ex.Message + "): every flat or round face can be picked.";
                 return all;
             }
         }
 
-        private static TopSide AllFlat(PartDocument part)
+        private static TopSide AllPickable(PartDocument part)
         {
             var t = new TopSide();
             try
             {
                 foreach (Face f in part.ComponentDefinition.SurfaceBodies[1].Faces)
-                    if (f.SurfaceType == SurfaceTypeEnum.kPlaneSurface) t.Faces.Add(f.TransientKey);
+                    if (Engraver.CanEngrave(f)) t.Faces.Add(f.TransientKey);
             }
             catch { /* an empty set allows every face */ }
             return t;
@@ -53,13 +55,13 @@ namespace Engrave.Core
 
             var parent = new Dictionary<int, int>();
             var faces = new Dictionary<int, Face>();
-            var flat = new List<int>();
+            var pickable = new List<int>();   // flat faces and bend / rolled faces
             foreach (Face f in body.Faces)
             {
                 int k = f.TransientKey;
                 faces[k] = f;
                 parent[k] = k;
-                if (f.SurfaceType == SurfaceTypeEnum.kPlaneSurface) flat.Add(k);
+                if (Engraver.CanEngrave(f)) pickable.Add(k);
             }
 
             // join each flat face with the bend cylinders it runs into tangentially
@@ -98,23 +100,23 @@ namespace Engrave.Core
             TopSide result;
             if (roots.Count < 2)
             {
-                result = AllFlat(part);
-                result.Info = "Sides not found: every flat face can be picked.";
+                result = AllPickable(part);
+                result.Info = "Sides not found: every flat or round face can be picked.";
                 return result;
             }
             int r1 = roots[0], r2 = roots[1];
             if (area[r2] < 0.65 * area[r1])
             {
-                result = AllFlat(part);
-                result.Info = "The two sides cannot be told apart: every flat face can be picked.";
+                result = AllPickable(part);
+                result.Info = "The two sides cannot be told apart: every flat or round face can be picked.";
                 return result;
             }
             double total = 0;
             foreach (double a in area.Values) total += a;
             if (area[r1] + area[r2] < 0.5 * total)
             {
-                result = AllFlat(part);
-                result.Info = "The sides cannot be found reliably: every flat face can be picked.";
+                result = AllPickable(part);
+                result.Info = "The sides cannot be found reliably: every flat or round face can be picked.";
                 return result;
             }
 
@@ -143,7 +145,7 @@ namespace Engrave.Core
             result = new TopSide();
             if (b1 == b2)
             {
-                foreach (int k in flat)
+                foreach (int k in pickable)
                 {
                     int root = Root(parent, k);
                     if (root == r1 || root == r2) result.Faces.Add(k);
@@ -156,7 +158,7 @@ namespace Engrave.Core
             bool side1 = b1 > b2;
             if (!topIsInside) side1 = !side1;
             int top = side1 ? r1 : r2;
-            foreach (int k in flat) if (Root(parent, k) == top) result.Faces.Add(k);
+            foreach (int k in pickable) if (Root(parent, k) == top) result.Faces.Add(k);
             result.Info = "Top side: the side with most bends up (" + Math.Max(b1, b2) + " of " + (b1 + b2) + "). Only that side can be picked.";
             return result;
         }

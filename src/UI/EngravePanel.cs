@@ -12,7 +12,8 @@ namespace Engrave.UI
     internal sealed class PartRow
     {
         public string Name, Status;
-        public bool Done;
+        public bool Done;       // engraved in this run
+        public bool Engraved;   // has an engraving (from this run or before)
     }
 
     /// <summary>One line of the "Existing Engravings" list.</summary>
@@ -62,7 +63,7 @@ namespace Engrave.UI
         private readonly CheckBox _topInside = new CheckBox { Text = "Top is the inside of the bends", AutoSize = true };
 
         private readonly Label _status = new Label { AutoSize = false, Dock = DockStyle.Bottom, Height = 48, Padding = new Padding(8, 2, 8, 0), Tag = "keep", Visible = false };
-        private readonly InventorButton _primary, _secondary;
+        private readonly InventorButton _primary, _secondary, _skip;
 
         public event Action OrderChanged;
         public event Action TextEdited;
@@ -70,6 +71,7 @@ namespace Engrave.UI
         public event Action PickClicked;
         public event Action PrimaryClicked;
         public event Action SecondaryClicked;
+        public event Action TertiaryClicked;
         public event Action<int> EditRequested;
         public event Action<int> DeleteRequested;
         public event Action DeleteAllRequested;
@@ -92,7 +94,8 @@ namespace Engrave.UI
             _height = new FieldBox(theme);
             _maxChars = new FieldBox(theme); _maxChars.AsInteger(1, 99);
             _primary = new InventorButton(theme, "Done", true);
-            _secondary = new InventorButton(theme, "Skip", false);
+            _secondary = new InventorButton(theme, "Cancel", false);
+            _skip = new InventorButton(theme, "Skip", false);
             _deleteAll = new InventorButton(theme, "Delete All", false) { Width = 84 };
 
             BuildLayout();
@@ -102,7 +105,7 @@ namespace Engrave.UI
             _info.ForeColor = _orderHint.ForeColor = _existingInfo.ForeColor = theme.Dim;
             WireEvents();
             _pick.SetValue("", false);
-            SetMode(PanelMode.Picking, true);
+            SetMode(PanelMode.Picking, assembly);
         }
 
         private static ListView NewList() => new ListView
@@ -239,20 +242,25 @@ namespace Engrave.UI
 
         // ----- mode and status ----------------------------------------------------------------------------------
 
-        /// <summary>Picking: Done / Skip. Sketching a new text: Finish Sketch / Cancel. Editing an engraving: Finish Sketch.</summary>
+        /// <summary>
+        /// Picking: Done / Cancel (undo the whole run) / Skip. Sketching a new text: Finish Sketch / Cancel (this text only).
+        /// Editing an engraving: Finish Sketch.
+        /// </summary>
         public void SetMode(PanelMode mode, bool canSkip)
         {
             _mode = mode;
             bool picking = mode == PanelMode.Picking;
             _primary.Text = picking ? "Done" : "Finish Sketch";
             _primary.Width = picking ? 74 : 96;
-            _secondary.Text = picking ? "Skip" : "Cancel";
-            _secondary.Visible = picking ? canSkip : mode == PanelMode.Sketching;
+            _secondary.Text = "Cancel";
+            _secondary.Visible = picking || mode == PanelMode.Sketching;
+            _skip.Visible = picking && canSkip;
             foreach (Control c in new Control[] { _includeOrder, _order, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
                 c.Enabled = picking;
             UpdateExistingButtons();
             _primary.Invalidate();
             _secondary.Invalidate();
+            _skip.Invalidate();
         }
 
         /// <summary>Shows a message above the buttons; an empty text hides the line.</summary>
@@ -271,7 +279,7 @@ namespace Engrave.UI
         {
             var stack = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            AddSection(stack, "Order Number", OrderTable(), true);
+            AddSection(stack, "Text", OrderTable(), true);
             AddSection(stack, "Engrave", EngraveTable(), true);
             AddSection(stack, "Existing Engravings", ExistingTable(), true);
             AddSection(stack, "Settings", SettingsTable(), false);
@@ -282,9 +290,11 @@ namespace Engrave.UI
             // the main button on the left, as in Inventor
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 38, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Padding = new Padding(8, 7, 8, 0) };
             _primary.Margin = new Padding(0, 0, 6, 0);
-            _secondary.Margin = Padding.Empty;
+            _secondary.Margin = new Padding(0, 0, 6, 0);
+            _skip.Margin = Padding.Empty;
             buttons.Controls.Add(_primary);
             buttons.Controls.Add(_secondary);
+            buttons.Controls.Add(_skip);
 
             Controls.Add(scroll);
             Controls.Add(_status);
@@ -320,6 +330,9 @@ namespace Engrave.UI
             Wide(t, _includeOrder);
             Row(t, "Order", _order);
             Wide(t, _orderHint);
+            Row(t, "Name length", _maxChars);
+            var hint = new Label { Text = "The most characters of the part name (part number) that are engraved.", AutoSize = false, Height = 32, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
+            Wide(t, hint);
             return t;
         }
 
@@ -373,7 +386,6 @@ namespace Engrave.UI
             var t = Table();
             Row(t, "Depth (mm)", _depth);
             Row(t, "Height (mm)", _height);
-            Row(t, "Max. chars", _maxChars);
             Wide(t, _topInside);
             var hint = new Label { Text = "Empty height: Inventor's default text size. The depth is never more than a quarter of the sheet thickness.", AutoSize = false, Height = 46, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, hint);
@@ -392,10 +404,21 @@ namespace Engrave.UI
             using (var fill = new SolidBrush(e.Item.Selected ? _theme.AccentFill : _theme.Field)) e.Graphics.FillRectangle(fill, b);
             if (row == null) return;
             Color ink = _parts.Enabled ? _theme.Text : _theme.Dim;
-            TextRenderer.DrawText(e.Graphics, row.Name, _parts.Font, new Rectangle(b.X + 8, b.Y, b.Width - 100, b.Height), ink,
+            if (row.Engraved) DrawCheck(e.Graphics, new Rectangle(b.X + 5, b.Y + (b.Height - 14) / 2, 14, 14), row.Done ? _theme.Link : _theme.Dim);
+            TextRenderer.DrawText(e.Graphics, row.Name, _parts.Font, new Rectangle(b.X + 24, b.Y, b.Width - 116, b.Height), ink,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
             TextRenderer.DrawText(e.Graphics, row.Status, _parts.Font, new Rectangle(b.Right - 92, b.Y, 86, b.Height),
                 row.Done ? _theme.Link : _theme.Dim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+
+        /// <summary>A tick: bright for parts engraved in this run, dim for parts that were engraved before.</summary>
+        private static void DrawCheck(Graphics g, Rectangle r, Color color)
+        {
+            var mode = g.SmoothingMode;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var pen = new Pen(color, 2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+                g.DrawLines(pen, new[] { new PointF(r.X + 2, r.Y + r.Height * 0.55f), new PointF(r.X + r.Width * 0.4f, r.Bottom - 2), new PointF(r.Right - 1, r.Y + 2) });
+            g.SmoothingMode = mode;
         }
 
         private void DrawExistingRow(object sender, DrawListViewItemEventArgs e)
@@ -467,14 +490,15 @@ namespace Engrave.UI
 
             _primary.Click += (s, e) => PrimaryClicked?.Invoke();
             _secondary.Click += (s, e) => SecondaryClicked?.Invoke();
+            _skip.Click += (s, e) => TertiaryClicked?.Invoke();
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if (keyData == Keys.Escape)
             {
-                if (_mode == PanelMode.Sketching) SecondaryClicked?.Invoke();
-                else PrimaryClicked?.Invoke();
+                if (_mode == PanelMode.EditingExisting) PrimaryClicked?.Invoke();
+                else SecondaryClicked?.Invoke();
                 return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);

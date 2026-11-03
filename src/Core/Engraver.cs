@@ -6,37 +6,46 @@ using Inventor;
 namespace Engrave.Core
 {
     /// <summary>
-    /// Puts the text as a sketch on a face, cuts it shallowly into the part, and finds, edits or deletes engravings made
-    /// earlier. The names are those of the iLogic rule this add-in replaces, so engravings made by the rule are found too.
+    /// Puts the text as a sketch on a face, engraves it with Inventor's Emboss (Engrave from Face), and finds, edits or
+    /// deletes engravings made earlier. On a round face the sketch goes on a work plane tangent to the face at the picked
+    /// point and the engraving is wrapped onto the face. The names are those of the iLogic rule this add-in replaces, so
+    /// engravings made by the rule (extrude cuts) are found too.
     /// </summary>
     internal static class Engraver
     {
         public const string FeatureName = "Graveer";
         public const string SketchName = "GraveerSketch";
-        private const string NewSketchName = "GraveerSketch (new)";
+        private const string PlaneName = "GraveerVlak";
+        private const string NewSuffix = " (new)";
         private const string EngravedProperty = "Graveren";
 
         // ----- finding ------------------------------------------------------------------------------------------
 
-        /// <summary>The engraving cut of the part, or null when it has none.</summary>
-        public static ExtrudeFeature Find(PartDocument part)
+        /// <summary>The engraving feature of the part (an emboss, or an extrude cut made by the old rule), or null.</summary>
+        public static PartFeature Find(PartDocument part)
         {
             try
             {
-                foreach (ExtrudeFeature f in part.ComponentDefinition.Features.ExtrudeFeatures)
-                    if (f.Name == FeatureName) return f;
+                foreach (PartFeature f in part.ComponentDefinition.Features)
+                    if (f.Name == FeatureName && (f is EmbossFeature || f is ExtrudeFeature)) return f;
             }
             catch { /* part not readable */ }
             return null;
         }
 
-        public static PlanarSketch SketchOf(ExtrudeFeature f)
+        public static PlanarSketch SketchOf(PartFeature f)
         {
-            try { return f.Profile.Parent as PlanarSketch; } catch { return null; }
+            try
+            {
+                if (f is EmbossFeature emboss) return emboss.Profile.Parent as PlanarSketch;
+                if (f is ExtrudeFeature extrude) return extrude.Profile.Parent as PlanarSketch;
+            }
+            catch { }
+            return null;
         }
 
         /// <summary>The engraved text as one line, or "" when it cannot be read.</summary>
-        public static string TextOf(ExtrudeFeature f)
+        public static string TextOf(PartFeature f)
         {
             PlanarSketch sketch = SketchOf(f);
             if (sketch == null) return "";
@@ -51,6 +60,13 @@ namespace Engrave.Core
             }
             catch { }
             return string.Join(" / ", parts);
+        }
+
+        /// <summary>Faces that can carry text: flat ones, and round ones (tubes), where the text is wrapped.</summary>
+        public static bool CanEngrave(Face f)
+        {
+            try { return f.SurfaceType == SurfaceTypeEnum.kPlaneSurface || f.SurfaceType == SurfaceTypeEnum.kCylinderSurface; }
+            catch { return false; }
         }
 
         // ----- a new engraving ----------------------------------------------------------------------------------
@@ -71,12 +87,20 @@ namespace Engrave.Core
             Point partPoint = point.Copy();
             partPoint.TransformBy(toPart);
 
-            ExtrudeFeature old = Find(part);
-            if (old != null) { try { old.Suppressed = true; } catch { } }
-            DeleteSketches(def, NewSketchName);
+            DeleteSketches(def, SketchName + NewSuffix);
+            DeletePlanes(def, PlaneName + NewSuffix);
 
-            PlanarSketch sketch = def.Sketches.Add(face);
-            sketch.Name = NewSketchName;
+            // the sketch first: suppressing the old engraving may change the picked face
+            PlanarSketch sketch;
+            if (face.SurfaceType == SurfaceTypeEnum.kCylinderSurface)
+            {
+                WorkPlane plane = TangentPlane(app, def, face, partPoint);
+                plane.Name = PlaneName + NewSuffix;
+                sketch = def.Sketches.Add(plane);
+                try { plane.Visible = false; } catch { }
+            }
+            else sketch = def.Sketches.Add(face);
+            sketch.Name = SketchName + NewSuffix;
             TextBox box = sketch.TextBoxes.AddFitted(sketch.ModelToSketchSpace(partPoint), text, Type.Missing);
 
             if (settings.TextHeightMm > 0 && !SetHeight(box, text, settings.TextHeightMm / 10, out string why))
@@ -84,12 +108,33 @@ namespace Engrave.Core
 
             try { box.Rotation = Angle(app, view, toPart, sketch, face); }
             catch (Exception ex) { warnings.Add("Turning the text failed: " + ex.Message); }
+
+            PartFeature old = Find(part);
+            if (old != null) { try { old.Suppressed = true; } catch { } }
             return sketch;
         }
 
         /// <summary>
-        /// Cuts the sketch into the part and replaces the previous engraving. Returns false when the sketch holds no text,
-        /// in which case nothing is cut and the previous engraving is back.
+        /// A fixed work plane touching the round face at the picked point: X along the axis (so the text runs along the
+        /// tube), the normal pointing out of the material.
+        /// </summary>
+        private static WorkPlane TangentPlane(Inventor.Application app, PartComponentDefinition def, Face face, Point p)
+        {
+            var cylinder = (Cylinder)face.Geometry;
+            double[] points = { p.X, p.Y, p.Z };
+            double[] normals = new double[3];
+            face.Evaluator.GetNormalAtPoint(ref points, ref normals);
+            TransientGeometry tg = app.TransientGeometry;
+            Vector n = tg.CreateVector(normals[0], normals[1], normals[2]);
+            Vector x = cylinder.AxisVector.AsVector();
+            Vector y = n.CrossProduct(x);
+            return def.WorkPlanes.AddFixed(p, x.AsUnitVector(), y.AsUnitVector(), false);
+        }
+
+        /// <summary>
+        /// Engraves the sketch into the part (wrapped onto the face when the sketch is on a tangent work plane) and replaces
+        /// the previous engraving. Returns false when the sketch holds no text, in which case nothing is engraved and the
+        /// previous engraving is back.
         /// </summary>
         public static bool Complete(PartDocument part, PlanarSketch sketch, EngraveSettings settings, List<string> warnings)
         {
@@ -99,31 +144,61 @@ namespace Engrave.Core
                 return false;
             }
             PartComponentDefinition def = part.ComponentDefinition;
-            ExtrudeFeatures extrudes = def.Features.ExtrudeFeatures;
             Profile profile = sketch.Profiles.AddForSolid();
-            ExtrudeDefinition cut = extrudes.CreateExtrudeDefinition(profile, PartFeatureOperationEnum.kCutOperation);
-            // negative direction: into the material, the sketch lies on the picked face
-            cut.SetDistanceExtent(Depth(part, settings), PartFeatureExtentDirectionEnum.kNegativeExtentDirection);
-            ExtrudeFeature feature = extrudes.Add(cut);
+            object wrap = WrapFace(def, sketch) ?? Type.Missing;
+            double depth = Depth(part, settings);
+            EmbossFeature feature;
+            try
+            {
+                // negative: against the sketch normal, which points out of the material
+                feature = def.Features.EmbossFeatures.AddEngraveFromFace(profile, depth,
+                    PartFeatureExtentDirectionEnum.kNegativeExtentDirection, Type.Missing, wrap);
+            }
+            catch (Exception first)
+            {
+                Log.Write("Engrave from face (negative direction) failed, trying the other way: " + first.Message);
+                feature = def.Features.EmbossFeatures.AddEngraveFromFace(profile, depth,
+                    PartFeatureExtentDirectionEnum.kPositiveExtentDirection, Type.Missing, wrap);
+            }
 
             // the engraving is in the part now; what follows only tidies up, and failures are reported, not fatal
-            foreach (ExtrudeFeature f in Named(def, FeatureName))
+            foreach (PartFeature f in Named(def, FeatureName))
             {
                 try { f.Delete(false, false, false); } catch (Exception ex) { warnings.Add("Old engraving not removed: " + ex.Message); }
             }
             DeleteSketches(def, SketchName);
-            try { feature.Name = FeatureName; } catch (Exception ex) { warnings.Add("Naming the cut failed: " + ex.Message); }
+            DeletePlanes(def, PlaneName);
+            try { feature.Name = FeatureName; } catch (Exception ex) { warnings.Add("Naming the engraving failed: " + ex.Message); }
             try { sketch.Name = SketchName; } catch (Exception ex) { warnings.Add("Naming the sketch failed: " + ex.Message); }
+            foreach (WorkPlane wp in PlanesNamed(def, PlaneName + NewSuffix)) { try { wp.Name = PlaneName; } catch { } }
             SetEngravedProperty(part, true, warnings);
             try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
             return true;
         }
 
-        /// <summary>Removes a sketch made by <see cref="Start"/> and brings the previous engraving back.</summary>
+        /// <summary>The round face under a sketch on a tangent work plane (found again at the plane's origin), else null.</summary>
+        private static Face WrapFace(PartComponentDefinition def, PlanarSketch sketch)
+        {
+            try
+            {
+                if (!(sketch.PlanarEntity is WorkPlane plane)) return null;
+                Point origin = ((Plane)plane.Plane).RootPoint;
+                foreach (SurfaceBody body in def.SurfaceBodies)
+                {
+                    if (body.LocateUsingPoint(ObjectTypeEnum.kFaceObject, origin, 0.001) is Face f
+                        && f.SurfaceType == SurfaceTypeEnum.kCylinderSurface) return f;
+                }
+            }
+            catch (Exception ex) { Log.Write("Finding the face to wrap onto failed: " + ex.Message); }
+            return null;
+        }
+
+        /// <summary>Removes a sketch made by <see cref="Start"/> (and its work plane) and brings the previous engraving back.</summary>
         public static void Abandon(PartDocument part, PlanarSketch sketch)
         {
             try { sketch?.Delete(); } catch { }
-            ExtrudeFeature old = Find(part);
+            try { DeletePlanes(part.ComponentDefinition, PlaneName + NewSuffix); } catch { }
+            PartFeature old = Find(part);
             if (old != null) { try { old.Suppressed = false; } catch { } }
         }
 
@@ -132,20 +207,22 @@ namespace Engrave.Core
         /// <summary>After the sketch of an engraving was edited: an empty sketch deletes the engraving.</summary>
         public static void AfterEdit(PartDocument part, List<string> warnings)
         {
-            ExtrudeFeature f = Find(part);
+            PartFeature f = Find(part);
             if (f == null) return;
             PlanarSketch sketch = SketchOf(f);
             if (sketch != null && sketch.TextBoxes.Count == 0) Delete(part, warnings);
             else try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
         }
 
-        /// <summary>Deletes the engraving cut and its sketch, and clears the "Graveren" iProperty.</summary>
+        /// <summary>Deletes the engraving, its sketch and work plane, and clears the "Graveren" iProperty.</summary>
         public static void Delete(PartDocument part, List<string> warnings)
         {
             PartComponentDefinition def = part.ComponentDefinition;
-            foreach (ExtrudeFeature f in Named(def, FeatureName)) f.Delete(false, false, false);
+            foreach (PartFeature f in Named(def, FeatureName)) f.Delete(false, false, false);
             DeleteSketches(def, SketchName);
-            DeleteSketches(def, NewSketchName);
+            DeleteSketches(def, SketchName + NewSuffix);
+            DeletePlanes(def, PlaneName);
+            DeletePlanes(def, PlaneName + NewSuffix);
             SetEngravedProperty(part, false, warnings);
             try { part.Update2(true); } catch (Exception ex) { warnings.Add("Updating the part failed: " + ex.Message); }
         }
@@ -163,10 +240,11 @@ namespace Engrave.Core
             return depth;
         }
 
-        private static List<ExtrudeFeature> Named(PartComponentDefinition def, string name)
+        private static List<PartFeature> Named(PartComponentDefinition def, string name)
         {
-            var list = new List<ExtrudeFeature>();
-            foreach (ExtrudeFeature f in def.Features.ExtrudeFeatures) if (f.Name == name) list.Add(f);
+            var list = new List<PartFeature>();
+            foreach (PartFeature f in def.Features)
+                if (f.Name == name && (f is EmbossFeature || f is ExtrudeFeature)) list.Add(f);
             return list;
         }
 
@@ -175,6 +253,18 @@ namespace Engrave.Core
             var list = new List<PlanarSketch>();
             foreach (PlanarSketch s in def.Sketches) if (s.Name == name) list.Add(s);
             foreach (PlanarSketch s in list) { try { s.Delete(); } catch { } }
+        }
+
+        private static List<WorkPlane> PlanesNamed(PartComponentDefinition def, string name)
+        {
+            var list = new List<WorkPlane>();
+            foreach (WorkPlane p in def.WorkPlanes) if (p.Name == name) list.Add(p);
+            return list;
+        }
+
+        private static void DeletePlanes(PartComponentDefinition def, string name)
+        {
+            foreach (WorkPlane p in PlanesNamed(def, name)) { try { p.Delete(false); } catch { } }
         }
 
         private static void SetEngravedProperty(PartDocument part, bool value, List<string> warnings)
