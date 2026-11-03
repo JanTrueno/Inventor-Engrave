@@ -1,0 +1,17 @@
+Third-party material used by this add-in
+========================================
+
+Autodesk Weave icons
+--------------------
+Some interface icons (edit, caret-down-xs, caret-right-xs, close-xs, close-s) come from
+the @weave-design/icons package (version 1.1.0) of Autodesk's Weave design system, https://github.com/Autodesk/hig
+(https://www.npmjs.com/package/@weave-design/icons), licensed under the Apache License, Version 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+The SVG sources were rendered to PNG at 16, 24 and 32 px in a light and a dark colour (src/Assets/Weave). No other
+change was made to the artwork.
+
+Inventor interface icons
+------------------------
+The select arrow in the face field is read at run time from the resource DLLs of the user's own Autodesk Inventor
+installation (InvImages_*.dll / InvImagesDark_*.dll). Nothing from those files is copied into or shipped with this add-in.
