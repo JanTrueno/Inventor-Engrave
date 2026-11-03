@@ -28,4 +28,4 @@ foreach ($f in 'Engrave.dll', 'Engrave.pdb', 'Engrave.deps.json') {
     Copy-Item (Join-Path $out $f) $target -Force
 }
 "Installed to $bundle"
-"Start Inventor 2025; the Engrave button is on the Sheet Metal tab of a part and the Assemble tab of an assembly."
+"Start Inventor 2025; the Engrave button is on the Sheet Metal and 3D Model tabs of a part, the Assemble tab of an assembly and the Place Views tab of a drawing."
