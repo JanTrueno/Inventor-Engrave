@@ -8,17 +8,20 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
 
 ## Features
 
-- **Assembly**: every visible part that can be changed is listed once, also when it is used several times (the
-  engraving is in the part file). Sheet metal parts come first. Hidden and suppressed parts are left out, and so are
-  read-only library and Content Center parts. Click any part in the list to go on from there, or **Skip** to the next one. A checkmark
+- **Assembly**: every visible part is listed once, also when it is used several times (the engraving is in the part
+  file): sheet metal, tubes, profiles, any part. Sheet metal parts come first. Hidden and suppressed parts are left
+  out, and so are standard Content Center parts (bolts, nuts). A read-only part (checked in) is listed as such. Click any part in the list to go on from there, or **Skip** to the next one. A checkmark
   shows which parts are engraved: bright for this run, dim for earlier.
 - **Drawing**: every sheet is one row, for the part in its first view. That part opens in its own window to pick the
-  face, and the text is `part number - sheet number`. The windows are closed again at the end.
+  face; the windows are closed again at the end. The text is built the same way as elsewhere (iProperties, read from
+  the drawing, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**.
 - **Top side found for you** (sheet metal): the side with the inside of most bends ("bends up") is shown in green and
-  only those faces can be picked. If the sides cannot be told apart, every face can be picked. A setting turns this
+  only those faces can be picked. Untick **Sheet metal: only the top side** to pick any face, for example every side
+  of a square tube made as sheet metal. If the sides cannot be told apart, every face can be picked. A setting turns this
   around if your CAM software sees the other side as the top.
-- **Tubes and round faces**: on a round face the sketch goes on a work plane touching the face where you click, and
-  the text is wrapped onto the face. Flat faces of any part work as well.
+- **Tubes and round faces**: on a round face (a round tube) the sketch goes on a work plane touching the face where
+  you click, and the text is wrapped onto the face (Emboss, Wrap to Face). On parts that are not sheet metal, such as
+  square tubes and profiles, every flat and round face can be picked.
 - **Your own text**: the part number, cut off after a number of characters you set (**Name length**, 20 by default).
   **+ iProperty** adds iProperties whose values go in front of it, in the order you add them (for example
   `ordernummer`). Pick them like in the iProperty Manager: Summary, Project, Status, or Custom with the custom

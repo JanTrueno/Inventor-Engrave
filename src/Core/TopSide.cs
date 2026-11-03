@@ -21,10 +21,12 @@ namespace Engrave.Core
             try { return Faces.Count == 0 || Faces.Contains(f.TransientKey); } catch { return true; }
         }
 
-        public static TopSide Find(PartDocument part, bool topIsInside)
+        public static TopSide Find(PartDocument part, bool topIsInside, bool topOnly = true)
         {
             if (!(part.ComponentDefinition is SheetMetalComponentDefinition))
-                return new TopSide { Info = "Not sheet metal: any flat or round face can be picked. Text on a round face is wrapped onto it." };
+                return new TopSide { Info = "Any flat or round face can be picked. Text on a round face is wrapped onto it." };
+            if (!topOnly)
+                return new TopSide { Info = "Sheet metal, every side: any flat or round face can be picked. Text on a round face is wrapped onto it." };
             try { return Compute(part, topIsInside); }
             catch (Exception ex)
             {

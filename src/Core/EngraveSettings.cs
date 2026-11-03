@@ -33,6 +33,15 @@ namespace Engrave.Core
         public bool TopIsInsideOfBends { get; set; } = true;
 
         /// <summary>
+        /// Sheet metal: only the top side can be picked. Off: every flat or round face, for example all four sides of
+        /// a square tube made as sheet metal.
+        /// </summary>
+        public bool TopSideOnly { get; set; } = true;
+
+        /// <summary>Drawings: put " - sheet number" after the part name.</summary>
+        public bool AddSheetNumber { get; set; } = true;
+
+        /// <summary>
         /// The iProperties whose values go in front of the part name, in this order (for example an order number);
         /// read from the open assembly or part.
         /// </summary>

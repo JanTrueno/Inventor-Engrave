@@ -63,7 +63,6 @@ namespace Engrave.UI
 
         /// <summary>Reads the value of an iProperty from the open document; set by the command.</summary>
         public Func<string, string> ReadValue;
-        private Control _textHeader, _textBody;
 
         /// <summary>Custom iProperties of the open document, with their values, for the pick menu; set by the command.</summary>
         public Func<IList<KeyValuePair<string, string>>> CustomProperties;
@@ -84,6 +83,8 @@ namespace Engrave.UI
         // settings
         private readonly FieldBox _depth, _height, _maxChars, _placeholder;
         private readonly CheckBox _topInside = new CheckBox { Text = "Top is the inside of the bends", AutoSize = true };
+        private readonly CheckBox _topOnly = new CheckBox { Text = "Sheet metal: only the top side", AutoSize = true };
+        private readonly CheckBox _addSheet = new CheckBox { Text = "Add the sheet number ( - 3)", AutoSize = true, Visible = false };
 
         private readonly Label _status = new Label { AutoSize = false, Dock = DockStyle.Bottom, Height = 48, Padding = new Padding(8, 2, 8, 0), Tag = "keep", Visible = false };
         private readonly InventorButton _primary, _secondary, _skip;
@@ -239,12 +240,8 @@ namespace Engrave.UI
             _propList.ResumeLayout();
         }
 
-        /// <summary>The Text section is hidden in a drawing, where the text is always "part number - sheet".</summary>
-        public void ShowTextOptions(bool visible)
-        {
-            if (_textHeader != null) _textHeader.Visible = visible;
-            if (_textBody != null) _textBody.Visible = visible;
-        }
+        /// <summary>The sheet number option is only shown for a drawing.</summary>
+        public void ShowSheetOption(bool visible) => _addSheet.Visible = visible;
 
         /// <summary>Shows what goes in front of the name, or why the value cannot be used.</summary>
         public void SetOrderHint(string text, bool isError)
@@ -331,6 +328,8 @@ namespace Engrave.UI
             _height.Text = s.TextHeightMm > 0 ? EngraveSettings.Format(s.TextHeightMm) : "";
             _maxChars.IntValue = s.MaxPartChars;
             _topInside.Checked = s.TopIsInsideOfBends;
+            _topOnly.Checked = s.TopSideOnly;
+            _addSheet.Checked = s.AddSheetNumber;
             _placeholder.Text = s.PlaceholderValue ?? "";
             _loading = false;
         }
@@ -352,6 +351,8 @@ namespace Engrave.UI
             }
             s.MaxPartChars = _maxChars.IntValue;
             s.TopIsInsideOfBends = _topInside.Checked;
+            s.TopSideOnly = _topOnly.Checked;
+            s.AddSheetNumber = _addSheet.Checked;
             s.Properties = PropertySpecs;
             s.PlaceholderValue = _placeholder.Text.Trim();
             return error;
@@ -372,7 +373,7 @@ namespace Engrave.UI
             _secondary.Text = "Cancel";
             _secondary.Visible = picking || mode == PanelMode.Sketching;
             _skip.Visible = picking && canSkip;
-            foreach (Control c in new Control[] { _propList, _propAdd, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
+            foreach (Control c in new Control[] { _propList, _propAdd, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside, _topOnly, _addSheet })
                 c.Enabled = picking;
             UpdateExistingButtons();
             _primary.Invalidate();
@@ -396,8 +397,7 @@ namespace Engrave.UI
         {
             var stack = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
             stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            _textBody = OrderTable();
-            _textHeader = AddSection(stack, "Text", _textBody, true);
+            AddSection(stack, "Text", OrderTable(), true);
             AddSection(stack, "Engrave", EngraveTable(), true);
             AddSection(stack, "Existing Engravings", ExistingTable(), true);
             AddSection(stack, "Settings", SettingsTable(), false);
@@ -467,6 +467,7 @@ namespace Engrave.UI
             Row(t, "Name length", _maxChars);
             var hint = new Label { Text = "The most characters of the part name (part number) that are engraved.", AutoSize = false, Height = 32, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, hint);
+            Wide(t, _addSheet);
             return t;
         }
 
@@ -484,6 +485,7 @@ namespace Engrave.UI
             }
             Row(t, "Text", _text);
             Row(t, "Face", _pick);
+            Wide(t, _topOnly);
             Wide(t, _info);
             return t;
         }
@@ -678,7 +680,8 @@ namespace Engrave.UI
 
             foreach (FieldBox box in new[] { _depth, _height, _maxChars, _placeholder })
                 box.TextChanged += (s, e) => { if (!_loading) SettingsChanged?.Invoke(); };
-            _topInside.CheckedChanged += (s, e) => { if (!_loading) SettingsChanged?.Invoke(); };
+            foreach (CheckBox box in new[] { _topInside, _topOnly, _addSheet })
+                box.CheckedChanged += (s, e) => { if (!_loading) SettingsChanged?.Invoke(); };
 
             _primary.Click += (s, e) => PrimaryClicked?.Invoke();
             _secondary.Click += (s, e) => SecondaryClicked?.Invoke();

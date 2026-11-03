@@ -140,7 +140,7 @@ namespace Engrave.UI
             if (_drawing != null) return CollectSheets();
             if (_top is PartDocument part)
             {
-                if (!Modifiable(part)) return "This part is read-only (a library or Content Center part) and cannot be engraved.";
+                if (IsLibraryPart(part)) return "This is a read-only library (Content Center) part and cannot be engraved.";
                 _items.Add(new Item { Part = part, Name = EngraveText.PartName(part), SheetMetal = part.ComponentDefinition is SheetMetalComponentDefinition });
             }
             else
@@ -152,7 +152,7 @@ namespace Engrave.UI
                     {
                         if (occ.Suppressed) continue;
                         if (!(occ.Definition.Document is PartDocument p)) continue;
-                        if (!Modifiable(p)) continue;
+                        if (IsLibraryPart(p)) continue;
                         bool visible = occ.Visible;
                         if (byFile.TryGetValue(p.FullDocumentName, out Item seen))
                         {
@@ -183,7 +183,7 @@ namespace Engrave.UI
                 {
                     if (sheet.DrawingViews.Count == 0) continue;
                     if (!(sheet.DrawingViews[1].ReferencedDocumentDescriptor.ReferencedDocument is PartDocument p)) continue;
-                    if (!Modifiable(p)) continue;
+                    if (IsLibraryPart(p)) continue;
                     _items.Add(new Item { Part = p, Name = EngraveText.PartName(p), Sheet = number, SheetMetal = p.ComponentDefinition is SheetMetalComponentDefinition });
                 }
                 catch { /* view without a readable part */ }
@@ -193,15 +193,29 @@ namespace Engrave.UI
             return null;
         }
 
-        private static bool Modifiable(PartDocument part)
+        /// <summary>
+        /// Standard Content Center parts (bolts, nuts...) are read-only library files and are left out. Every other part
+        /// is listed, also a read-only one (for example checked in to Vault): engraving it then reports why it fails.
+        /// </summary>
+        private static bool IsLibraryPart(PartDocument part)
         {
-            try { return ((Document)part).IsModifiable; } catch { return true; }
+            bool content = false, modifiable = true;
+            try { content = part.ComponentDefinition.IsContentMember; } catch { }
+            try { modifiable = ((Document)part).IsModifiable; } catch { }
+            return content && !modifiable;
         }
+
+        private static bool ReadOnly(PartDocument part)
+        {
+            try { return !((Document)part).IsModifiable; } catch { return false; }
+        }
+
+        private TopSide FindSide(Item item) => TopSide.Find(item.Part, _settings.TopIsInsideOfBends, _settings.TopSideOnly);
 
         private void Run()
         {
             _panel = new EngravePanel(Theme.Detect(_app), _asm != null || _drawing != null);
-            if (_drawing != null) _panel.ShowTextOptions(false);   // the drawing text is fixed: part number - sheet
+            _panel.ShowSheetOption(_drawing != null);
             _panel.LoadSettings(_settings);
             _panel.ReadValue = name => EngraveText.ReadProperty(_top, name);
             _panel.SetProperties(_settings.Properties);
@@ -283,10 +297,11 @@ namespace Engrave.UI
                 RefreshParts();
                 return;
             }
-            if (item.Side == null) item.Side = TopSide.Find(item.Part, _settings.TopIsInsideOfBends);
+            if (item.Side == null) item.Side = FindSide(item);
             if (!item.TextEdited) item.Text = ComposeText(item);
             _panel.SetText(item.Text);
             string info = item.Side.Info;
+            if (ReadOnly(item.Part)) info += " The part file is read-only (checked in?): check it out to engrave it.";
             if (Engraver.Find(item.Part) != null) info += " This part is engraved already; a new engraving replaces it.";
             _panel.SetInfo(info);
             _panel.SetStatus("", false);
@@ -295,9 +310,12 @@ namespace Engrave.UI
             StartPicking();
         }
 
-        private string ComposeText(Item item) => item.Sheet > 0
-            ? EngraveText.PartName(item.Part) + " - " + item.Sheet
-            : EngraveText.Compose(string.Join(" ", _panel.PropertyTexts.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
+        /// <summary>[iProperty texts ]part name, and in a drawing " - sheet number" when that option is on.</summary>
+        private string ComposeText(Item item)
+        {
+            string text = EngraveText.Compose(string.Join(" ", _panel.PropertyTexts.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
+            return item.Sheet > 0 && _settings.AddSheetNumber ? text + " - " + item.Sheet : text;
+        }
 
         /// <summary>The part in orange; its top side in green on top of that, so it is clear where to click.</summary>
         private void Highlight(Item item)
@@ -350,7 +368,7 @@ namespace Engrave.UI
             {
                 Item item = _items[i];
                 bool engraved = Engraver.Find(item.Part) != null;
-                string status = item.Done ? "Engraved" : item.Skipped ? "Skipped" : engraved ? "Engraved before" : item.SheetMetal ? "" : "Not sheet metal";
+                string status = item.Done ? "Engraved" : item.Skipped ? "Skipped" : engraved ? "Engraved before" : ReadOnly(item.Part) ? "Read-only" : "";
                 rows.Add(new PartRow { Name = item.Label, Status = status, Done = item.Done && engraved, Engraved = engraved });
             }
             _panel.SetParts(rows, _walk.IndexOf(_current));
@@ -379,7 +397,7 @@ namespace Engrave.UI
         // ----- iProperty in front, text and settings ------------------------------------------------------------
 
         /// <summary>The iProperties in front of the name may be used: none holds the placeholder for "not filled in".</summary>
-        private bool OrderValid() => _drawing != null || Placeholders().Count == 0;
+        private bool OrderValid() => Placeholders().Count == 0;
 
         /// <summary>The names of the iProperties whose value is the placeholder; their fields are marked.</summary>
         private List<string> Placeholders()
@@ -460,10 +478,10 @@ namespace Engrave.UI
 
         private void OnSettingsChanged()
         {
-            bool topInside = _settings.TopIsInsideOfBends;
+            bool topInside = _settings.TopIsInsideOfBends, topOnly = _settings.TopSideOnly;
             if (_panel.ReadSettings(_settings) != null) return;
             OnOrderChanged();   // the placeholder or the name length may have changed
-            if (topInside != _settings.TopIsInsideOfBends)
+            if (topInside != _settings.TopIsInsideOfBends || topOnly != _settings.TopSideOnly)
             {
                 foreach (Item item in _items) item.Side = null;
                 if (_current >= 0) Choose(_current);
@@ -790,7 +808,7 @@ namespace Engrave.UI
             _current = index;
             try { ShowPart(item); }
             catch (Exception ex) { _panel.SetStatus("Could not open " + item.Name + ": " + ex.Message, true); return; }
-            if (item.Side == null) item.Side = TopSide.Find(item.Part, _settings.TopIsInsideOfBends);
+            if (item.Side == null) item.Side = FindSide(item);
             Highlight(item);
             RefreshParts();
             try
@@ -873,7 +891,7 @@ namespace Engrave.UI
             {
                 Item cur = _items[_current];
                 cur.Side = null;   // the faces changed; read the top side again
-                cur.Side = TopSide.Find(cur.Part, _settings.TopIsInsideOfBends);
+                cur.Side = FindSide(cur);
                 Highlight(cur);
                 if (wasPicking || deleted > 0) StartPicking();
             }
