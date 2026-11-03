@@ -46,14 +46,20 @@ namespace Engrave.UI
         private readonly List<PropertyRow> _propRows = new List<PropertyRow>();
         private InventorButton _propAdd;
 
-        /// <summary>One iProperty in front of the name: its name, its value (editable) and a remove button.</summary>
+        /// <summary>
+        /// One iProperty in front of the name: its name, text before and after the value (for example "X" after a
+        /// quantity, giving "5X"), the value itself (editable) and a remove button.
+        /// </summary>
         private sealed class PropertyRow
         {
             public string Name;
             public Label Label;
-            public FieldBox Value;
+            public FieldBox Before, Value, After;
             public IconButton Remove;
         }
+
+        // column titles above the iProperty rows
+        private Label _colBefore, _colValue, _colAfter;
 
         /// <summary>Reads the value of an iProperty from the open document; set by the command.</summary>
         public Func<string, string> ReadValue;
@@ -135,17 +141,23 @@ namespace Engrave.UI
 
 
         /// <summary>Shows the iProperties to put in front of the name, with their values read from the open document.</summary>
-        public void SetProperties(IEnumerable<string> names)
+        public void SetProperties(IEnumerable<PropertySpec> specs)
         {
             _loading = true;
             foreach (PropertyRow row in _propRows) DisposeRow(row);
             _propRows.Clear();
-            foreach (string n in names ?? new string[0]) AddPropertyRow(n, false);
+            foreach (PropertySpec p in specs ?? new PropertySpec[0]) AddPropertyRow(p.Name, false, p.Before, p.After);
             _loading = false;
         }
 
         public IList<string> PropertyNames => _propRows.ConvertAll(r => r.Name);
         public IList<string> PropertyValues => _propRows.ConvertAll(r => r.Value.Text.Trim());
+
+        /// <summary>What each iProperty adds to the text: before + value + after, or "" when its value is empty.</summary>
+        public IList<string> PropertyTexts => _propRows.ConvertAll(r =>
+            r.Value.Text.Trim().Length == 0 ? "" : r.Before.Text + r.Value.Text.Trim() + r.After.Text);
+
+        public List<PropertySpec> PropertySpecs => _propRows.ConvertAll(r => new PropertySpec { Name = r.Name, Before = r.Before.Text, After = r.After.Text });
 
         /// <summary>Marks the value of one iProperty as unusable (for example the placeholder for "not filled in").</summary>
         public void MarkProperty(int index, bool invalid)
@@ -153,7 +165,7 @@ namespace Engrave.UI
             if (index >= 0 && index < _propRows.Count) _propRows[index].Value.Invalid = invalid;
         }
 
-        private void AddPropertyRow(string name, bool notify)
+        private void AddPropertyRow(string name, bool notify, string before = "", string after = "")
         {
             name = (name ?? "").Trim();
             if (name.Length == 0 || _propRows.Exists(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))) return;
@@ -161,14 +173,19 @@ namespace Engrave.UI
             {
                 Name = name,
                 Label = new Label { Text = name, AutoSize = false, AutoEllipsis = true, Width = LabelWidth - 4, Height = 22, TextAlign = ContentAlignment.MiddleLeft, ForeColor = _theme.Text, BackColor = Color.Transparent, Margin = new Padding(0, 3, 4, 3), Tag = "keep" },
+                Before = Affix(name, "before"),
                 Value = new FieldBox(_theme) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 3, 0, 3) },
+                After = Affix(name, "after"),
                 Remove = new IconButton(_theme, "Remove " + name + " from the text", ActionIcons.Delete) { Size = new Size(26, 22), Margin = new Padding(4, 3, 0, 3) }
             };
             bool wasLoading = _loading;
             _loading = true;
             try { row.Value.Text = ReadValue?.Invoke(name) ?? ""; } catch { }
+            row.Before.Text = before ?? "";
+            row.After.Text = after ?? "";
             _loading = wasLoading;
-            row.Value.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
+            foreach (FieldBox box in new[] { row.Before, row.Value, row.After })
+                box.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
             row.Remove.Click += (s, e) =>
             {
                 _propRows.Remove(row);
@@ -181,9 +198,19 @@ namespace Engrave.UI
             if (notify) OrderChanged?.Invoke();
         }
 
+        /// <summary>A narrow field for text before or after the value.</summary>
+        private FieldBox Affix(string name, string where)
+        {
+            var box = new FieldBox(_theme) { Width = 36, Margin = where == "before" ? new Padding(0, 3, 4, 3) : new Padding(4, 3, 0, 3) };
+            _tips.SetToolTip(box, "Text " + where + " the value of " + name + " (for example X after a quantity: 5X)");
+            return box;
+        }
+
+        private readonly ToolTip _tips = new ToolTip();
+
         private void DisposeRow(PropertyRow row)
         {
-            foreach (Control c in new Control[] { row.Label, row.Value, row.Remove })
+            foreach (Control c in new Control[] { row.Label, row.Before, row.Value, row.After, row.Remove })
             {
                 try { _propList.Controls.Remove(c); c.Dispose(); } catch { }
             }
@@ -194,13 +221,19 @@ namespace Engrave.UI
             _propList.SuspendLayout();
             _propList.Controls.Clear();
             _propList.RowStyles.Clear();
-            _propList.RowCount = _propRows.Count;
+            _propList.RowCount = _propRows.Count + 1;
+            _propList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _propList.Controls.Add(_colBefore, 1, 0);
+            _propList.Controls.Add(_colValue, 2, 0);
+            _propList.Controls.Add(_colAfter, 3, 0);
             for (int i = 0; i < _propRows.Count; i++)
             {
                 _propList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                _propList.Controls.Add(_propRows[i].Label, 0, i);
-                _propList.Controls.Add(_propRows[i].Value, 1, i);
-                _propList.Controls.Add(_propRows[i].Remove, 2, i);
+                _propList.Controls.Add(_propRows[i].Label, 0, i + 1);
+                _propList.Controls.Add(_propRows[i].Before, 1, i + 1);
+                _propList.Controls.Add(_propRows[i].Value, 2, i + 1);
+                _propList.Controls.Add(_propRows[i].After, 3, i + 1);
+                _propList.Controls.Add(_propRows[i].Remove, 4, i + 1);
             }
             _propList.Visible = _propRows.Count > 0;
             _propList.ResumeLayout();
@@ -319,7 +352,7 @@ namespace Engrave.UI
             }
             s.MaxPartChars = _maxChars.IntValue;
             s.TopIsInsideOfBends = _topInside.Checked;
-            s.PropertyNames = new List<string>(PropertyNames);
+            s.Properties = PropertySpecs;
             s.PlaceholderValue = _placeholder.Text.Trim();
             return error;
         }
@@ -415,9 +448,16 @@ namespace Engrave.UI
             var t = Table();
             var intro = new Label { Text = "iProperties in front of the part name, in this order:", AutoSize = true, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, intro);
+            _propList.ColumnCount = 5;
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LabelWidth));
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
+            Label Title(string text) => new Label { Text = text, AutoSize = true, Tag = "keep", ForeColor = _theme.Dim, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 0), Font = new Font(Font.FontFamily, 7.5f) };
+            _colBefore = Title("before");
+            _colValue = Title("value");
+            _colAfter = Title("after");
             _propList.Visible = false;
             Wide(t, _propList);
             _propList.Anchor = AnchorStyles.Left | AnchorStyles.Right;

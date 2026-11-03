@@ -25,8 +25,9 @@ names (`Graveer`, `GraveerSketch`), so engravings made with those rules are foun
 - **Your own text**: the part number, cut off after a number of characters you set (**Name length**, 20 by default).
   **+ iProperty** adds iProperties whose values go in front of it, in the order you add them (for example
   `ordernummer`). Pick them like in the iProperty Manager: Summary, Project, Status, or Custom with the custom
-  iProperties of the open document and their values, or type any name. Each has its own value field and a remove
-  button. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
+  iProperties of the open document and their values, or type any name. Each has its own value field, a small
+  **before** and **after** field for text around the value (for example `X` after `Aantal`, giving `5X`), and a
+  remove button. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
   You can still change the text per part before you click a face.
 - **Place it yourself**: the text starts where you click, along the longest straight edge and readable from your view.
   Drag it or turn it (Sketch → Rotate), then **Finish Sketch** in Inventor or in the panel. **Cancel** while

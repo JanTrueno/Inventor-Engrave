@@ -200,7 +200,7 @@ namespace Engrave.UI
             if (_drawing != null) _panel.ShowTextOptions(false);   // the drawing text is fixed: part number - sheet
             _panel.LoadSettings(_settings);
             _panel.ReadValue = name => EngraveText.ReadProperty(_top, name);
-            _panel.SetProperties(_settings.PropertyNames);
+            _panel.SetProperties(_settings.Properties);
 
             _panel.OrderChanged += OnOrderChanged;
             _panel.CustomProperties = CustomProperties;
@@ -292,7 +292,7 @@ namespace Engrave.UI
 
         private string ComposeText(Item item) => item.Sheet > 0
             ? EngraveText.PartName(item.Part) + " - " + item.Sheet
-            : EngraveText.Compose(string.Join(" ", _panel.PropertyValues.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
+            : EngraveText.Compose(string.Join(" ", _panel.PropertyTexts.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
 
         /// <summary>The part in orange; its top side in green on top of that, so it is clear where to click.</summary>
         private void Highlight(Item item)

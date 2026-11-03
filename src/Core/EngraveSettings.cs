@@ -6,6 +6,14 @@ using System.Text.Json;
 
 namespace Engrave.Core
 {
+    /// <summary>An iProperty in front of the part name, with text to put before and after its value.</summary>
+    internal sealed class PropertySpec
+    {
+        public string Name { get; set; } = "";
+        public string Before { get; set; } = "";
+        public string After { get; set; } = "";
+    }
+
     /// <summary>The panel's settings, remembered between sessions in %APPDATA%\Engrave\settings.json.</summary>
     internal sealed class EngraveSettings
     {
@@ -28,9 +36,10 @@ namespace Engrave.Core
         /// The iProperties whose values go in front of the part name, in this order (for example an order number);
         /// read from the open assembly or part.
         /// </summary>
-        public List<string> PropertyNames { get; set; } = new List<string>();
+        public List<PropertySpec> Properties { get; set; } = new List<PropertySpec>();
 
-        /// <summary>Older settings files held one iProperty; it is moved into <see cref="PropertyNames"/> on loading.</summary>
+        /// <summary>Older settings files held only names, or one iProperty; they are moved into <see cref="Properties"/> on loading.</summary>
+        public List<string> PropertyNames { get; set; } = new List<string>();
         public bool IncludeProperty { get; set; }
         public string PropertyName { get; set; } = "";
 
@@ -49,9 +58,13 @@ namespace Engrave.Core
                 if (File.Exists(FilePath))
                 {
                     EngraveSettings s = JsonSerializer.Deserialize<EngraveSettings>(File.ReadAllText(FilePath), Json) ?? new EngraveSettings();
+                    if (s.Properties == null) s.Properties = new List<PropertySpec>();
                     if (s.PropertyNames == null) s.PropertyNames = new List<string>();
                     if (s.PropertyNames.Count == 0 && s.IncludeProperty && !string.IsNullOrWhiteSpace(s.PropertyName))
                         s.PropertyNames.Add(s.PropertyName.Trim());
+                    if (s.Properties.Count == 0)
+                        foreach (string n in s.PropertyNames) s.Properties.Add(new PropertySpec { Name = n });
+                    s.PropertyNames = new List<string>();
                     s.IncludeProperty = false;
                     s.PropertyName = "";
                     return s;
