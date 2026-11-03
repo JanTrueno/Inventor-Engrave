@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -23,10 +24,14 @@ namespace Engrave.Core
         /// </summary>
         public bool TopIsInsideOfBends { get; set; } = true;
 
-        /// <summary>Put the value of an iProperty (for example an order number) in front of the part name.</summary>
-        public bool IncludeProperty { get; set; }
+        /// <summary>
+        /// The iProperties whose values go in front of the part name, in this order (for example an order number);
+        /// read from the open assembly or part.
+        /// </summary>
+        public List<string> PropertyNames { get; set; } = new List<string>();
 
-        /// <summary>The iProperty to put in front, by name; read from the open assembly or part.</summary>
+        /// <summary>Older settings files held one iProperty; it is moved into <see cref="PropertyNames"/> on loading.</summary>
+        public bool IncludeProperty { get; set; }
         public string PropertyName { get; set; } = "";
 
         /// <summary>A value that means the iProperty is not filled in yet (for example 160100); refused when found. Empty: none.</summary>
@@ -42,7 +47,15 @@ namespace Engrave.Core
             try
             {
                 if (File.Exists(FilePath))
-                    return JsonSerializer.Deserialize<EngraveSettings>(File.ReadAllText(FilePath), Json) ?? new EngraveSettings();
+                {
+                    EngraveSettings s = JsonSerializer.Deserialize<EngraveSettings>(File.ReadAllText(FilePath), Json) ?? new EngraveSettings();
+                    if (s.PropertyNames == null) s.PropertyNames = new List<string>();
+                    if (s.PropertyNames.Count == 0 && s.IncludeProperty && !string.IsNullOrWhiteSpace(s.PropertyName))
+                        s.PropertyNames.Add(s.PropertyName.Trim());
+                    s.IncludeProperty = false;
+                    s.PropertyName = "";
+                    return s;
+                }
             }
             catch (Exception ex) { Log.Write("Reading " + FilePath + " failed: " + ex.Message); }
             return new EngraveSettings();

@@ -13,7 +13,7 @@ names (`Graveer`, `GraveerSketch`), so engravings made with those rules are foun
 
 - **Assembly**: every visible part that can be changed is listed once, also when it is used several times (the
   engraving is in the part file). Sheet metal parts come first. Hidden and suppressed parts are left out, and so are
-  read-only library and Content Center parts. Pick any part in the list, or **Skip** to the next one. A checkmark
+  read-only library and Content Center parts. Click any part in the list to go on from there, or **Skip** to the next one. A checkmark
   shows which parts are engraved: bright for this run, dim for earlier.
 - **Drawing**: every sheet is one row, for the part in its first view. That part opens in its own window to pick the
   face, and the text is `part number - sheet number`. The windows are closed again at the end.
@@ -23,16 +23,20 @@ names (`Graveer`, `GraveerSketch`), so engravings made with those rules are foun
 - **Tubes and round faces**: on a round face the sketch goes on a work plane touching the face where you click, and
   the text is wrapped onto the face. Flat faces of any part work as well.
 - **Your own text**: the part number, cut off after a number of characters you set (**Name length**, 20 by default).
-  Tick **Put an iProperty in front of the name** and pick it with the **▾** button (Summary, Project, Status, or
-  Custom with the custom iProperties of the open document and their values), or type any name, to put its value in
-  front (for example `ordernummer`). A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
+  **+ iProperty** adds iProperties whose values go in front of it, in the order you add them (for example
+  `ordernummer`). Pick them like in the iProperty Manager: Summary, Project, Status, or Custom with the custom
+  iProperties of the open document and their values, or type any name. Each has its own value field and a remove
+  button. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
   You can still change the text per part before you click a face.
 - **Place it yourself**: the text starts where you click, along the longest straight edge and readable from your view.
   Drag it or turn it (Sketch → Rotate), then **Finish Sketch** in Inventor or in the panel. **Cancel** while
-  sketching drops that text only.
+  sketching drops that text only. Inventor's **Return** does no harm: it finishes the sketch like Finish Sketch,
+  and picking simply carries on.
 - **Existing engravings**: listed with their text. **Edit** opens the text sketch to move or change the text,
   **Delete** removes one engraving, **Delete All** removes them all.
-- **Cancel**: closes the panel and undoes everything Engrave did since you started it.
+- **Cancel**: closes the panel and puts every part back as it was when you started. Until you click **Done**, a
+  replaced or deleted engraving is kept aside in the part (suppressed, named `Graveer (old)`), so Cancel can bring it
+  back; Done removes it.
 - **Safe depth**: 0.5 mm by default, never more than a quarter of the thickness for sheet metal.
 - Nothing is saved for you.
 
@@ -70,14 +74,14 @@ This builds the add-in and installs it as an app bundle in `%APPDATA%\Autodesk\A
 
 1. Click **Engrave**: on the **Assemble** tab of an assembly, the **Sheet Metal** or **3D Model** tab of a part, or
    the **Place Views** tab of a drawing.
-2. Optionally tick **Put an iProperty in front of the name** and pick the iProperty with **▾**. It is remembered.
+2. Optionally add iProperties with **+ iProperty**. They are remembered.
 3. The first part is highlighted in orange (for sheet metal, the top side in green). Click the face for the text.
 4. Drag the text into place, turn it if needed, and click **Finish Sketch**. It is engraved and the next part is up.
-5. Click **Done** when you are finished, and save. **Cancel** undoes the whole run.
+5. Click **Done** when you are finished, and save. **Cancel** puts everything back.
 
 The settings are kept in `%APPDATA%\Engrave\settings.json`. A log is written to `%LOCALAPPDATA%\Engrave\log.txt`.
 
 ## License
 
-GPL-3.0, see [LICENSE](LICENSE). The section chevrons, list icons and the ▾ button come from Autodesk Weave (Apache-2.0), see
+GPL-3.0, see [LICENSE](LICENSE). The section chevrons and list icons come from Autodesk Weave (Apache-2.0), see
 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).

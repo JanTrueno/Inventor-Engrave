@@ -42,11 +42,22 @@ namespace Engrave.UI
         private PanelMode _mode = PanelMode.Picking;
 
         // iProperty in front of the part name (for example an order number)
-        private readonly CheckBox _includeProp = new CheckBox { Text = "Put an iProperty in front of the name", AutoSize = true };
-        private readonly FieldBox _propName, _propValue;
+        private readonly TableLayoutPanel _propList = new TableLayoutPanel { ColumnCount = 3, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = Padding.Empty };
+        private readonly List<PropertyRow> _propRows = new List<PropertyRow>();
+        private InventorButton _propAdd;
+
+        /// <summary>One iProperty in front of the name: its name, its value (editable) and a remove button.</summary>
+        private sealed class PropertyRow
+        {
+            public string Name;
+            public Label Label;
+            public FieldBox Value;
+            public IconButton Remove;
+        }
+
+        /// <summary>Reads the value of an iProperty from the open document; set by the command.</summary>
+        public Func<string, string> ReadValue;
         private Control _textHeader, _textBody;
-        private TableLayoutPanel _propRow;   // the iProperty name field with its pick button
-        private IconButton _propPick;
 
         /// <summary>Custom iProperties of the open document, with their values, for the pick menu; set by the command.</summary>
         public Func<IList<KeyValuePair<string, string>>> CustomProperties;
@@ -72,7 +83,6 @@ namespace Engrave.UI
         private readonly InventorButton _primary, _secondary, _skip;
 
         public event Action OrderChanged;
-        public event Action PropertyNameChanged;
         public event Action TextEdited;
         public event Action<int> PartChosen;
         public event Action PickClicked;
@@ -94,8 +104,6 @@ namespace Engrave.UI
             ForeColor = theme.Text;
             Dock = DockStyle.Fill;
 
-            _propName = new FieldBox(theme);
-            _propValue = new FieldBox(theme);
             _placeholder = new FieldBox(theme);
             _text = new FieldBox(theme);
             _pick = new SelectorField(theme);
@@ -125,27 +133,78 @@ namespace Engrave.UI
 
         // ----- iProperty in front of the name -------------------------------------------------------------------
 
-        public void SetProperty(bool include, string name, string value)
-        {
-            _loading = true;
-            _includeProp.Checked = include;
-            _propName.Text = name ?? "";
-            _propValue.Text = value ?? "";
-            _loading = false;
-            UpdateOrderRow();
-        }
 
-        /// <summary>Shows the value read for a newly typed iProperty name.</summary>
-        public void SetPropertyValue(string value)
+        /// <summary>Shows the iProperties to put in front of the name, with their values read from the open document.</summary>
+        public void SetProperties(IEnumerable<string> names)
         {
             _loading = true;
-            _propValue.Text = value ?? "";
+            foreach (PropertyRow row in _propRows) DisposeRow(row);
+            _propRows.Clear();
+            foreach (string n in names ?? new string[0]) AddPropertyRow(n, false);
             _loading = false;
         }
 
-        public bool IncludeProperty => _includeProp.Checked;
-        public string PropertyName => _propName.Text.Trim();
-        public string PropertyValue => _propValue.Text.Trim();
+        public IList<string> PropertyNames => _propRows.ConvertAll(r => r.Name);
+        public IList<string> PropertyValues => _propRows.ConvertAll(r => r.Value.Text.Trim());
+
+        /// <summary>Marks the value of one iProperty as unusable (for example the placeholder for "not filled in").</summary>
+        public void MarkProperty(int index, bool invalid)
+        {
+            if (index >= 0 && index < _propRows.Count) _propRows[index].Value.Invalid = invalid;
+        }
+
+        private void AddPropertyRow(string name, bool notify)
+        {
+            name = (name ?? "").Trim();
+            if (name.Length == 0 || _propRows.Exists(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))) return;
+            var row = new PropertyRow
+            {
+                Name = name,
+                Label = new Label { Text = name, AutoSize = false, AutoEllipsis = true, Width = LabelWidth - 4, Height = 22, TextAlign = ContentAlignment.MiddleLeft, ForeColor = _theme.Text, BackColor = Color.Transparent, Margin = new Padding(0, 3, 4, 3), Tag = "keep" },
+                Value = new FieldBox(_theme) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 3, 0, 3) },
+                Remove = new IconButton(_theme, "Remove " + name + " from the text", ActionIcons.Delete) { Size = new Size(26, 22), Margin = new Padding(4, 3, 0, 3) }
+            };
+            bool wasLoading = _loading;
+            _loading = true;
+            try { row.Value.Text = ReadValue?.Invoke(name) ?? ""; } catch { }
+            _loading = wasLoading;
+            row.Value.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
+            row.Remove.Click += (s, e) =>
+            {
+                _propRows.Remove(row);
+                DisposeRow(row);
+                LayoutPropertyRows();
+                OrderChanged?.Invoke();
+            };
+            _propRows.Add(row);
+            LayoutPropertyRows();
+            if (notify) OrderChanged?.Invoke();
+        }
+
+        private void DisposeRow(PropertyRow row)
+        {
+            foreach (Control c in new Control[] { row.Label, row.Value, row.Remove })
+            {
+                try { _propList.Controls.Remove(c); c.Dispose(); } catch { }
+            }
+        }
+
+        private void LayoutPropertyRows()
+        {
+            _propList.SuspendLayout();
+            _propList.Controls.Clear();
+            _propList.RowStyles.Clear();
+            _propList.RowCount = _propRows.Count;
+            for (int i = 0; i < _propRows.Count; i++)
+            {
+                _propList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                _propList.Controls.Add(_propRows[i].Label, 0, i);
+                _propList.Controls.Add(_propRows[i].Value, 1, i);
+                _propList.Controls.Add(_propRows[i].Remove, 2, i);
+            }
+            _propList.Visible = _propRows.Count > 0;
+            _propList.ResumeLayout();
+        }
 
         /// <summary>The Text section is hidden in a drawing, where the text is always "part number - sheet".</summary>
         public void ShowTextOptions(bool visible)
@@ -159,13 +218,6 @@ namespace Engrave.UI
         {
             _propHint.Text = text ?? "";
             _propHint.ForeColor = isError ? ErrorColor : _theme.Dim;
-            _propValue.Invalid = isError;
-        }
-
-        private void UpdateOrderRow()
-        {
-            ShowRow(_propRow, _includeProp.Checked);
-            ShowRow(_propValue, _includeProp.Checked);
         }
 
         // ----- engraving ----------------------------------------------------------------------------------------
@@ -267,8 +319,7 @@ namespace Engrave.UI
             }
             s.MaxPartChars = _maxChars.IntValue;
             s.TopIsInsideOfBends = _topInside.Checked;
-            s.IncludeProperty = _includeProp.Checked;
-            if (PropertyName.Length > 0) s.PropertyName = PropertyName;
+            s.PropertyNames = new List<string>(PropertyNames);
             s.PlaceholderValue = _placeholder.Text.Trim();
             return error;
         }
@@ -288,7 +339,7 @@ namespace Engrave.UI
             _secondary.Text = "Cancel";
             _secondary.Visible = picking || mode == PanelMode.Sketching;
             _skip.Visible = picking && canSkip;
-            foreach (Control c in new Control[] { _includeProp, _propName, _propPick, _propValue, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
+            foreach (Control c in new Control[] { _propList, _propAdd, _placeholder, _parts, _text, _pick, _depth, _height, _maxChars, _topInside })
                 c.Enabled = picking;
             UpdateExistingButtons();
             _primary.Invalidate();
@@ -362,19 +413,16 @@ namespace Engrave.UI
         private TableLayoutPanel OrderTable()
         {
             var t = Table();
-            Wide(t, _includeProp);
-            _propPick = new IconButton(_theme, "Pick an iProperty", DrawCaret) { Size = new Size(26, 22) };
-            _propRow = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-            _propRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            _propRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
-            _propName.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            _propName.Margin = Padding.Empty;
-            _propPick.Margin = new Padding(4, 0, 0, 0);
-            _propRow.Controls.Add(_propName, 0, 0);
-            _propRow.Controls.Add(_propPick, 1, 0);
-            Row(t, "iProperty", _propRow);
-            _propRow.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            Row(t, "Value", _propValue);
+            var intro = new Label { Text = "iProperties in front of the part name, in this order:", AutoSize = true, Tag = "keep", ForeColor = _theme.Dim };
+            Wide(t, intro);
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LabelWidth));
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
+            _propList.Visible = false;
+            Wide(t, _propList);
+            _propList.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            _propAdd = new InventorButton(_theme, "+ iProperty", false) { Width = 96 };
+            Wide(t, _propAdd);
             Wide(t, _propHint);
             Row(t, "Name length", _maxChars);
             var hint = new Label { Text = "The most characters of the part name (part number) that are engraved.", AutoSize = false, Height = 32, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim };
@@ -490,7 +538,7 @@ namespace Engrave.UI
                 if (e.KeyCode != Keys.Enter) return;
                 e.SuppressKeyPress = true;
                 menu.Close();
-                if (typed.Text.Trim().Length > 0) _propName.Text = typed.Text.Trim();
+                AddPropertyRow(typed.Text, true);
             };
             custom.DropDownItems.Add(new ToolStripLabel("Other name (Enter to use):") { ForeColor = _theme.Dim });
             custom.DropDownItems.Add(typed);
@@ -502,18 +550,10 @@ namespace Engrave.UI
 
         private ToolStripMenuItem PickItem(string name, string text)
         {
-            bool current = string.Equals(name, PropertyName, StringComparison.OrdinalIgnoreCase);
-            var item = new ToolStripMenuItem(text) { ForeColor = current ? _theme.Link : _theme.Text };
-            item.Click += (s, e) => _propName.Text = name;   // raises PropertyNameChanged, which reads the value
+            bool added = _propRows.Exists(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+            var item = new ToolStripMenuItem(text) { Enabled = !added, ForeColor = added ? _theme.Dim : _theme.Text };
+            item.Click += (s, e) => AddPropertyRow(name, true);
             return item;
-        }
-
-        private static void DrawCaret(Graphics g, Rectangle b, Color ink)
-        {
-            Rectangle r = new Rectangle(b.X + (b.Width - 12) / 2, b.Y + (b.Height - 12) / 2, 12, 12);
-            if (WeaveIcons.Draw(g, r, "caret-down-xs")) return;
-            using (var brush = new SolidBrush(ink))
-                g.FillPolygon(brush, new[] { new PointF(r.X + 2, r.Y + 4), new PointF(r.Right - 2, r.Y + 4), new PointF(r.X + 6, r.Bottom - 3) });
         }
 
         /// <summary>A tick: bright for parts engraved in this run, dim for parts that were engraved before.</summary>
@@ -572,15 +612,20 @@ namespace Engrave.UI
 
         private void WireEvents()
         {
-            _includeProp.CheckedChanged += (s, e) => { UpdateOrderRow(); if (!_loading) OrderChanged?.Invoke(); };
-            _propValue.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
-            _propName.TextChanged += (s, e) => { if (!_loading) PropertyNameChanged?.Invoke(); };
-            _propPick.Click += (s, e) => PropertyMenu().Show(_propPick, new Point(0, _propPick.Height));
+            _propAdd.Click += (s, e) => PropertyMenu().Show(_propAdd, new Point(0, _propAdd.Height));
             _text.TextChanged += (s, e) => { if (!_loading) { _text.Invalid = false; TextEdited?.Invoke(); } };
             _parts.SelectedIndexChanged += (s, e) =>
             {
                 if (_loading || _parts.SelectedIndices.Count != 1) return;
                 PartChosen?.Invoke(_parts.SelectedIndices[0]);
+            };
+            // A click on the row that is already selected changes no selection, but should still go on at that part.
+            int selectedBefore = -1;
+            _parts.MouseDown += (s, e) => selectedBefore = _parts.SelectedIndices.Count == 1 ? _parts.SelectedIndices[0] : -1;
+            _parts.MouseClick += (s, e) =>
+            {
+                ListViewItem hit = _parts.HitTest(e.Location).Item;
+                if (hit != null && hit.Index == selectedBefore) PartChosen?.Invoke(hit.Index);
             };
             _pick.Clicked += () => PickClicked?.Invoke();
             _pick.ClearClicked += () => PickClicked?.Invoke();

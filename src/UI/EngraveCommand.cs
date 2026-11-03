@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using Timer = System.Windows.Forms.Timer;
 using Inventor;
@@ -198,10 +199,10 @@ namespace Engrave.UI
             _panel = new EngravePanel(Theme.Detect(_app), _asm != null || _drawing != null);
             if (_drawing != null) _panel.ShowTextOptions(false);   // the drawing text is fixed: part number - sheet
             _panel.LoadSettings(_settings);
-            _panel.SetProperty(_settings.IncludeProperty, _settings.PropertyName, EngraveText.ReadProperty(_top, _settings.PropertyName));
+            _panel.ReadValue = name => EngraveText.ReadProperty(_top, name);
+            _panel.SetProperties(_settings.PropertyNames);
 
             _panel.OrderChanged += OnOrderChanged;
-            _panel.PropertyNameChanged += OnPropertyNameChanged;
             _panel.CustomProperties = CustomProperties;
             _panel.TextEdited += OnTextEdited;
             _panel.PartChosen += k => Choose(_walk[k]);
@@ -291,7 +292,7 @@ namespace Engrave.UI
 
         private string ComposeText(Item item) => item.Sheet > 0
             ? EngraveText.PartName(item.Part) + " - " + item.Sheet
-            : EngraveText.Compose(_panel.IncludeProperty ? _panel.PropertyValue : "", item.Part, _settings.MaxPartChars);
+            : EngraveText.Compose(string.Join(" ", _panel.PropertyValues.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
 
         /// <summary>The part in orange; its top side in green on top of that, so it is clear where to click.</summary>
         private void Highlight(Item item)
@@ -372,23 +373,37 @@ namespace Engrave.UI
 
         // ----- iProperty in front, text and settings ------------------------------------------------------------
 
-        /// <summary>The iProperty value may be used: it is off, or it is not the placeholder for "not filled in".</summary>
-        private bool OrderValid()
+        /// <summary>The iProperties in front of the name may be used: none holds the placeholder for "not filled in".</summary>
+        private bool OrderValid() => _drawing != null || Placeholders().Count == 0;
+
+        /// <summary>The names of the iProperties whose value is the placeholder; their fields are marked.</summary>
+        private List<string> Placeholders()
         {
-            if (_drawing != null || !_panel.IncludeProperty) return true;
-            return !EngraveText.IsPlaceholder(_panel.PropertyValue, _settings.PlaceholderValue);
+            var bad = new List<string>();
+            IList<string> names = _panel.PropertyNames, values = _panel.PropertyValues;
+            for (int i = 0; i < names.Count; i++)
+            {
+                bool placeholder = EngraveText.IsPlaceholder(values[i], _settings.PlaceholderValue);
+                _panel.MarkProperty(i, placeholder);
+                if (placeholder) bad.Add("\u201C" + names[i] + "\u201D");
+            }
+            return bad;
         }
 
         private void ShowOrderHint()
         {
-            if (!_panel.IncludeProperty) _panel.SetOrderHint("", false);
-            else if (_panel.PropertyName.Length == 0)
-                _panel.SetOrderHint("Type the name of the iProperty, for example an order number property.", false);
-            else if (EngraveText.IsPlaceholder(_panel.PropertyValue, _settings.PlaceholderValue))
-                _panel.SetOrderHint(_settings.PlaceholderValue + " means “" + _panel.PropertyName + "” is not filled in yet. Type the right value.", true);
-            else if (_panel.PropertyValue.Length == 0)
-                _panel.SetOrderHint("“" + _panel.PropertyName + "” is empty here: the text is the part number only.", false);
-            else _panel.SetOrderHint("The value is put in front of the part number.", false);
+            List<string> bad = Placeholders();
+            var empty = new List<string>();
+            IList<string> names = _panel.PropertyNames, values = _panel.PropertyValues;
+            for (int i = 0; i < names.Count; i++) if (values[i].Length == 0) empty.Add("\u201C" + names[i] + "\u201D");
+
+            if (bad.Count > 0)
+                _panel.SetOrderHint(_settings.PlaceholderValue + " means " + string.Join(", ", bad) + " is not filled in yet. Type the right value.", true);
+            else if (names.Count == 0)
+                _panel.SetOrderHint("Add an iProperty (for example an order number) to put its value in front of the part number.", false);
+            else if (empty.Count > 0)
+                _panel.SetOrderHint(string.Join(", ", empty) + " is empty here and is left out.", false);
+            else _panel.SetOrderHint("", false);
         }
 
         /// <summary>The custom iProperties of the open assembly or part with their values, sorted by name.</summary>
@@ -407,13 +422,6 @@ namespace Engrave.UI
             catch { }
             list.Sort((x, y) => string.Compare(x.Key, y.Key, StringComparison.CurrentCultureIgnoreCase));
             return list;
-        }
-
-        /// <summary>A new iProperty name: read its value from the open assembly or part.</summary>
-        private void OnPropertyNameChanged()
-        {
-            _panel.SetPropertyValue(EngraveText.ReadProperty(_top, _panel.PropertyName));
-            OnOrderChanged();
         }
 
         private void OnOrderChanged()
@@ -465,7 +473,7 @@ namespace Engrave.UI
             if (!OrderValid())
             {
                 _panel.SetPick(false, "");
-                _panel.SetStatus("Fill in the iProperty value, or untick the iProperty.", true);
+                _panel.SetStatus("Fill in the iProperty value, or remove that iProperty from the text.", true);
                 return;
             }
             _events = _app.CommandManager.CreateInteractionEvents();
