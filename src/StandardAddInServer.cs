@@ -35,7 +35,8 @@ namespace Engrave
                 "Engrave", "Engrave.Start", CommandTypesEnum.kShapeEditCmdType, clientGuid,
                 "Engrave the part number into parts",
                 "Engrave\nPuts the part number, optionally after the value of an iProperty such as an order number, as text on a face of each part (the top side of sheet metal) and engraves it with Emboss. Works in parts, assemblies and drawings, and lists existing engravings for editing or deleting.",
-                Icons.CreateEngrave(16), Icons.CreateEngrave(32), ButtonDisplayEnum.kDisplayTextInLearningMode);
+                EmbossIcon(false) ?? Icons.CreateEngrave(16), EmbossIcon(true) ?? Icons.CreateEngrave(32),
+                ButtonDisplayEnum.kDisplayTextInLearningMode);
             _button.OnExecute += OnExecute;
 
             _uiEvents = _app.UserInterfaceManager.UserInterfaceEvents;
@@ -60,6 +61,10 @@ namespace Engrave
         }
 
         public void ExecuteCommand(int commandID) { }
+
+        /// <summary>Inventor's own Emboss icon, since the engraving is made with Emboss; null when it cannot be read.</summary>
+        private object EmbossIcon(bool large) =>
+            UI.InventorCommandIcons.Picture(_app, large, "Emboss", "PartEmbossCmd", "PartEmbossCtxCmd", "SheetMetalEmbossCmd");
 
         // ----- ribbon -------------------------------------------------------------------------------------------
 

@@ -61,12 +61,17 @@ namespace Engrave.UI
             if (ours) Closed?.Invoke();
         }
 
-        private static readonly Timer _front = new Timer { Interval = 250 };
+        // Several steps in a row (open a part, start the sketch...) ask for this; one check after the last of them does.
+        private static readonly Timer _front = new Timer { Interval = 300 };
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
 
         /// <summary>
-        /// Brings the Engrave tab to the front a moment from now. Inventor switches its left-hand area to the Model
-        /// browser when a part is opened or an edit starts or ends, and has no call to pick a tab, so the window is
-        /// hidden and shown again (which Inventor does put in front); <see cref="Closed"/> is not raised for it.
+        /// Brings the Engrave tab to the front a moment from now, if it is covered. Inventor switches its left-hand area
+        /// to the Model browser when a part is opened or an edit starts or ends, and has no call to pick a tab, so a
+        /// covered window is hidden and shown again (which Inventor does put in front); <see cref="Closed"/> is not
+        /// raised for it. When the Engrave tab is still in front nothing happens, so there is no flicker.
         /// </summary>
         public static void BringToFront()
         {
@@ -79,6 +84,10 @@ namespace Engrave.UI
         {
             _front.Stop();
             if (_window == null || _host == null || _host.Controls.Count == 0) return;
+            bool covered;
+            try { covered = _window.Visible && !IsWindowVisible(_host.Handle); }   // the tab of another window is in front
+            catch { covered = false; }
+            if (!covered) return;
             _hiding = true;
             try
             {

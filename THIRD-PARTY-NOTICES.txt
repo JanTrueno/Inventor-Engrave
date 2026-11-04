@@ -13,5 +13,5 @@ change was made to the artwork.
 
 Inventor interface icons
 ------------------------
-The select arrow in the face field is read at run time from the resource DLLs of the user's own Autodesk Inventor
-installation (InvImages_*.dll / InvImagesDark_*.dll). Nothing from those files is copied into or shipped with this add-in.
+The select arrow in the face field, and the Emboss icon used for the Engrave button, are read at run time from the resource DLLs of the user's own Autodesk Inventor
+installation (InvImages_*.dll / InvImagesDark_*.dll, and the Emboss command's own icon). Nothing from those files is copied into or shipped with this add-in.
