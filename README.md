@@ -6,6 +6,17 @@ part. For sheet metal it shows which side is the top. The text is placed as a sk
 it in Inventor's sketch environment, and it is then engraved with Inventor's Emboss (Engrave from Face). The panel is
 built in Inventor's own style and follows your theme, like the Tab and Slot add-in.
 
+![Picking the face in an assembly: the current part is solid with its top side in green, the rest is see-through](docs/images/picking.png)
+
+![The engraved text on the part](docs/images/result.png)
+
+<img src="docs/images/panel.png" alt="The Engrave panel: iProperties with before, after and keep, the part list and the existing engravings" width="336">
+
+## Install
+
+Download `Engrave-Setup-<version>.exe` from [Releases](https://github.com/JanTrueno/Inventor-Engrave/releases), close
+Inventor and run it. It installs per user (no admin rights); uninstall via Windows Settings → Apps.
+
 ## Features
 
 - **Assembly**: every visible part is listed once, also when it is used several times (the engraving is in the part
@@ -68,7 +79,7 @@ dotnet build Engrave.csproj -c Release
 
 The output goes to `bin\Release\net8.0-windows\`: `Engrave.dll`, `.pdb` and `.deps.json`.
 
-## Install
+## Install from source
 
 Close Inventor (it locks the add-in DLL while running), then run:
 
@@ -80,6 +91,12 @@ This builds the add-in and installs it as an app bundle in `%APPDATA%\Autodesk\A
 
 - `install.ps1 -SkipBuild` installs the last build without building again.
 - `install.ps1 -Remove` uninstalls it.
+
+To build the installer (`dist\Engrave-Setup-<version>.exe`, needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build-installer.ps1
+```
 
 ## Usage
 
