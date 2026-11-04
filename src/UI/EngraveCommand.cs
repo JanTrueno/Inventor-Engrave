@@ -246,6 +246,7 @@ namespace Engrave.UI
             DockHost.Closed += OnPanelClosed;
 
             DockHost.Show(_panel, "Engrave");
+            DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
             ShowOrderHint();
             RefreshExisting();
             ChooseFromSelection();
@@ -289,6 +290,7 @@ namespace Engrave.UI
             try { shown.Activate(); } catch { }
             if (!hadWindow && !_opened.Contains(shown)) _opened.Add(shown);
             CreateHighlightSets(shown);
+            DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
         }
 
         // ----- the part being engraved --------------------------------------------------------------------------
@@ -660,6 +662,7 @@ namespace Engrave.UI
                 _panel.BeginInvoke(new Action(() =>
                 {
                     LeaveEdit();
+                    DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
                     if (_current >= 0) Highlight(_items[_current]);
                     StartPicking();
                 }));
@@ -757,6 +760,7 @@ namespace Engrave.UI
                 sketch = Engraver.Start(_app, item.Part, occ, face, point, view, text.Trim(), _settings, warnings);
                 if (occ != null) { occ.Edit(); _editedOcc = occ; }
                 sketch.Edit();
+                DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
             }
             catch (Exception ex)
             {
@@ -847,6 +851,7 @@ namespace Engrave.UI
 
             // back to the assembly at once, so the next part is highlighted and can be picked straight away
             LeaveEdit();
+            DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
             _panel.SetMode(PanelMode.Picking, _walk.Count > 1);
             RefreshExisting();
             if (engraved)
@@ -930,6 +935,7 @@ namespace Engrave.UI
             {
                 if (item.Occ != null) { item.Occ.Edit(); _editedOcc = item.Occ; }
                 sketch.Edit();
+                DockHost.BringToFront();   // Inventor has just brought its Model browser tab forward
             }
             catch (Exception ex)
             {

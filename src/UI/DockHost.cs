@@ -49,6 +49,7 @@ namespace Engrave.UI
 
             _events = app.UserInterfaceManager.DockableWindows.Events;
             _events.OnHide += OnHide;
+            _front.Tick += OnFront;
         }
 
         private static void OnHide(DockableWindow window, EventTimingEnum timing, NameValueMap context, out HandlingCodeEnum handling)
@@ -58,6 +59,34 @@ namespace Engrave.UI
             bool ours;
             try { ours = window?.InternalName == WindowName; } catch { ours = false; }
             if (ours) Closed?.Invoke();
+        }
+
+        private static readonly Timer _front = new Timer { Interval = 250 };
+
+        /// <summary>
+        /// Brings the Engrave tab to the front a moment from now. Inventor switches its left-hand area to the Model
+        /// browser when a part is opened or an edit starts or ends, and has no call to pick a tab, so the window is
+        /// hidden and shown again (which Inventor does put in front); <see cref="Closed"/> is not raised for it.
+        /// </summary>
+        public static void BringToFront()
+        {
+            if (_window == null || _host == null || _host.Controls.Count == 0) return;
+            _front.Stop();
+            _front.Start();
+        }
+
+        private static void OnFront(object sender, EventArgs e)
+        {
+            _front.Stop();
+            if (_window == null || _host == null || _host.Controls.Count == 0) return;
+            _hiding = true;
+            try
+            {
+                _window.Visible = false;
+                _window.Visible = true;
+            }
+            catch { }
+            finally { _hiding = false; }
         }
 
         /// <summary>Brings the window back, for example after its cross was clicked but the command goes on.</summary>
@@ -78,6 +107,7 @@ namespace Engrave.UI
 
         public static void Hide(Control panel)
         {
+            _front.Stop();
             _hiding = true;
             try { if (_window != null) _window.Visible = false; } catch { }
             finally { _hiding = false; }
@@ -88,6 +118,8 @@ namespace Engrave.UI
         public static void Shutdown()
         {
             try { if (_events != null) _events.OnHide -= OnHide; } catch { }
+            _front.Stop();
+            _front.Tick -= OnFront;
             _events = null;
             try { _window?.Delete(); } catch { }
             try { _host?.Dispose(); } catch { }
