@@ -10,11 +10,15 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
 
 - **Assembly**: every visible part is listed once, also when it is used several times (the engraving is in the part
   file): sheet metal, tubes, profiles, any part. Sheet metal parts come first. Hidden and suppressed parts are left
-  out, and so are standard Content Center parts (bolts, nuts). A read-only part (checked in) is listed as such. Click any part in the list to go on from there, or **Skip** to the next one. A checkmark
+  out, and so are standard Content Center parts (bolts, nuts). A read-only part (checked in) is listed as such. Click any part in the list to go on from there, or **Skip** to the next one. To engrave only some parts, Ctrl or
+  Shift click them in the list, or select them (or a subassembly) in the model browser before you click Engrave:
+  Skip and the next part then only go through those, and a bar marks the part being engraved now. A checkmark
   shows which parts are engraved: bright for this run, dim for earlier.
 - **Drawing**: every sheet is one row, for the part in its first view. That part opens in its own window to pick the
   face; the windows are closed again at the end. The text is built the same way as elsewhere (iProperties, read from
-  the drawing, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**.
+  the drawing, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**. All
+  sheets are listed in order; for a range, Shift click the first and the last sheet, or select their views before
+  you start.
 - **Top side found for you** (sheet metal): the side with the inside of most bends ("bends up") is shown in green and
   only those faces can be picked. Untick **Sheet metal: only the top side** to pick any face, for example every side
   of a square tube made as sheet metal. If the sides cannot be told apart, every face can be picked. A setting turns this

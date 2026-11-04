@@ -46,7 +46,8 @@ namespace Engrave.UI
         private readonly List<Document> _opened = new List<Document>();   // parts this command opened a window for
         private readonly InventorWindow _owner;
         private readonly List<Item> _items = new List<Item>();
-        private readonly List<int> _walk = new List<int>();   // the items the panel's part list shows (the visible ones)
+        private readonly List<int> _walk = new List<int>();
+        private readonly HashSet<int> _chosen = new HashSet<int>();   // items to engrave; empty: all in the walk   // the items the panel's part list shows (the visible ones)
         private readonly List<string> _warnings = new List<string>();
         private readonly Timer _wait = new Timer { Interval = SketchPollMs };
         private readonly EngraveSettings _settings = EngraveSettings.Load();
@@ -223,7 +224,8 @@ namespace Engrave.UI
             _panel.OrderChanged += OnOrderChanged;
             _panel.CustomProperties = CustomProperties;
             _panel.TextEdited += OnTextEdited;
-            _panel.PartChosen += k => Choose(_walk[k]);
+            _panel.PartChosen += k => { _chosen.Clear(); Choose(_walk[k]); };
+            _panel.PartsChosen += OnPartsChosen;
             _panel.PickClicked += () => { if (_events == null) StartPicking(); else StopPicking(); };
             _panel.PrimaryClicked += OnPrimary;
             _panel.SecondaryClicked += OnSecondary;
@@ -245,8 +247,15 @@ namespace Engrave.UI
             DockHost.Show(_panel, "Engrave");
             ShowOrderHint();
             RefreshExisting();
-            if (_walk.Count > 0) Choose(_walk[0]);
-            else _panel.SetStatus("All parts are hidden; their engravings are listed below.", false);
+            ChooseFromSelection();
+            if (_walk.Count == 0)
+            {
+                _panel.SetStatus("All parts are hidden; their engravings are listed below.", false);
+                return;
+            }
+            Choose(_chosen.Count > 0 ? _walk.First(_chosen.Contains) : _walk[0]);
+            if (_chosen.Count > 0)
+                _panel.SetStatus(_chosen.Count + (_chosen.Count == 1 ? " part" : " parts") + " selected in Inventor: only " + (_chosen.Count == 1 ? "that one is" : "those are") + " engraved. Click a single part in the list to go back to all.", false);
         }
 
         /// <summary>The orange (part) and green (top side) highlights, in the document the user picks in.</summary>
@@ -343,22 +352,89 @@ namespace Engrave.UI
             catch (Exception ex) { Log.Write("Highlighting failed: " + ex.Message); }
         }
 
-        /// <summary>Next part that is neither engraved nor skipped in this run, after the current one.</summary>
+        /// <summary>
+        /// Next part that is neither engraved nor skipped in this run, after the current one; only among the chosen
+        /// parts when some are chosen.
+        /// </summary>
         private void Advance()
         {
             int start = Math.Max(0, _walk.IndexOf(_current));
             for (int n = 1; n <= _walk.Count; n++)
             {
-                Item item = _items[_walk[(start + n) % _walk.Count]];
+                int index = _walk[(start + n) % _walk.Count];
+                if (_chosen.Count > 0 && !_chosen.Contains(index)) continue;
+                Item item = _items[index];
                 if (!item.Done && !item.Skipped)
                 {
-                    Choose(_walk[(start + n) % _walk.Count]);
+                    Choose(index);
                     return;
                 }
             }
             StopPicking();
             RefreshParts();
-            _panel.SetStatus(_engraved + (_engraved == 1 ? " part" : " parts") + " engraved. Click Done to finish, or pick a part to do it again.", false);
+            string which = _chosen.Count > 0 ? " All chosen parts are done." : "";
+            _panel.SetStatus(_engraved + (_engraved == 1 ? " part" : " parts") + " engraved." + which + " Click Done to finish, or pick a part to do it again.", false);
+        }
+
+        /// <summary>Several parts selected in the list: only those are engraved, starting with the first of them.</summary>
+        private void OnPartsChosen(IList<int> rows)
+        {
+            if (_mode != PanelMode.Picking) return;
+            _chosen.Clear();
+            foreach (int k in rows) if (k >= 0 && k < _walk.Count) _chosen.Add(_walk[k]);
+            if (_chosen.Count == 0) return;
+            if (!_chosen.Contains(_current)) Choose(_walk.First(i => _chosen.Contains(i)));
+            else RefreshParts();
+            _panel.SetStatus(_chosen.Count + " parts chosen: Skip and the next part only go through those.", false);
+        }
+
+        /// <summary>
+        /// Parts selected in Inventor before Engrave started (components or their faces in the browser or the window, or
+        /// drawing views) become the chosen parts. A selected subassembly chooses all parts in it.
+        /// </summary>
+        private void ChooseFromSelection()
+        {
+            var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sheets = new HashSet<int>();
+            try
+            {
+                foreach (object o in _top.SelectSet)
+                {
+                    try
+                    {
+                        ComponentOccurrence occ = o as ComponentOccurrence ?? (o as FaceProxy)?.ContainingOccurrence ?? (o as EdgeProxy)?.ContainingOccurrence;
+                        if (occ != null) AddPartFiles(occ, files);
+                        else if (o is DrawingView view && _drawing != null) sheets.Add(SheetNumber(view.Parent as Sheet));
+                    }
+                    catch { /* something that is not a part */ }
+                }
+                if (files.Count > 0 || sheets.Count > 0) _top.SelectSet.Clear();   // it would get in the way of picking faces
+            }
+            catch (Exception ex) { Log.Write("Reading the selection failed: " + ex.Message); }
+
+            foreach (int i in _walk)
+            {
+                Item item = _items[i];
+                if (item.Sheet > 0 ? sheets.Contains(item.Sheet) : files.Contains(((Document)item.Part).FullFileName)) _chosen.Add(i);
+            }
+        }
+
+        private static void AddPartFiles(ComponentOccurrence occ, HashSet<string> files)
+        {
+            if (occ.Definition.Document is PartDocument part) { files.Add(((Document)part).FullFileName); return; }
+            foreach (ComponentOccurrence sub in occ.SubOccurrences) { try { AddPartFiles(sub, files); } catch { } }
+        }
+
+        private int SheetNumber(Sheet sheet)
+        {
+            if (sheet == null) return 0;
+            int n = 0;
+            foreach (Sheet s in _drawing.Sheets)
+            {
+                n++;
+                if (s.Name == sheet.Name) return n;
+            }
+            return 0;
         }
 
         private void RefreshParts()
@@ -369,7 +445,7 @@ namespace Engrave.UI
                 Item item = _items[i];
                 bool engraved = Engraver.Find(item.Part) != null;
                 string status = item.Done ? "Engraved" : item.Skipped ? "Skipped" : engraved ? "Engraved before" : ReadOnly(item.Part) ? "Read-only" : "";
-                rows.Add(new PartRow { Name = item.Label, Status = status, Done = item.Done && engraved, Engraved = engraved });
+                rows.Add(new PartRow { Name = item.Label, Status = status, Done = item.Done && engraved, Engraved = engraved, Current = i == _current, Chosen = _chosen.Contains(i) });
             }
             _panel.SetParts(rows, _walk.IndexOf(_current));
         }

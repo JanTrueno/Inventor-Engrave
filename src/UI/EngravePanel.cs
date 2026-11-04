@@ -14,6 +14,8 @@ namespace Engrave.UI
         public string Name, Status;
         public bool Done;       // engraved in this run
         public bool Engraved;   // has an engraving (from this run or before)
+        public bool Current;    // the part being engraved now
+        public bool Chosen;     // in the set of parts to engrave (shown selected)
     }
 
     /// <summary>One line of the "Existing Engravings" list.</summary>
@@ -92,6 +94,10 @@ namespace Engrave.UI
         public event Action OrderChanged;
         public event Action TextEdited;
         public event Action<int> PartChosen;
+
+        /// <summary>Several rows were selected (Ctrl / Shift click): only those parts are engraved.</summary>
+        public event Action<IList<int>> PartsChosen;
+        private bool _selectionPending;
         public event Action PickClicked;
         public event Action PrimaryClicked;
         public event Action SecondaryClicked;
@@ -261,7 +267,7 @@ namespace Engrave.UI
             {
                 var item = new ListViewItem(rows[i].Name) { Tag = rows[i] };
                 _parts.Items.Add(item);
-                if (i == current) item.Selected = true;
+                if (rows[i].Chosen || i == current) item.Selected = true;
             }
             _parts.EndUpdate();
             _parts.Height = Math.Max(1, Math.Min(rows.Count, MaxVisibleParts)) * PartRowHeight + 2;
@@ -476,12 +482,19 @@ namespace Engrave.UI
             var t = Table();
             if (_assembly)
             {
+                _parts.MultiSelect = true;
                 _parts.Columns.Add("Part", 240);
                 _parts.SmallImageList = new ImageList { ImageSize = new Size(1, PartRowHeight) };   // sets the row height
                 _parts.DrawItem += DrawPartRow;
                 _parts.Resize += (s, e) => FitColumn(_parts);
                 _parts.Dock = DockStyle.Fill;
                 Wide(t, _parts);
+                var listHint = new Label
+                {
+                    Text = "Ctrl or Shift click to engrave only some parts. Parts selected in the model browser before you start are chosen already.",
+                    AutoSize = false, Height = 32, Dock = DockStyle.Fill, Tag = "keep", ForeColor = _theme.Dim
+                };
+                Wide(t, listHint);
             }
             Row(t, "Text", _text);
             Row(t, "Face", _pick);
@@ -540,6 +553,8 @@ namespace Engrave.UI
             Rectangle b = e.Bounds;
             using (var fill = new SolidBrush(e.Item.Selected ? _theme.AccentFill : _theme.Field)) e.Graphics.FillRectangle(fill, b);
             if (row == null) return;
+            if (row.Current)   // a bar on the left marks the part being engraved now, also among several selected
+                using (var bar = new SolidBrush(_theme.Accent)) e.Graphics.FillRectangle(bar, b.X, b.Y + 2, 3, b.Height - 4);
             Color ink = _parts.Enabled ? _theme.Text : _theme.Dim;
             if (row.Engraved) DrawCheck(e.Graphics, new Rectangle(b.X + 5, b.Y + (b.Height - 14) / 2, 14, 14), row.Done ? _theme.Link : _theme.Dim);
             TextRenderer.DrawText(e.Graphics, row.Name, _parts.Font, new Rectangle(b.X + 24, b.Y, b.Width - 116, b.Height), ink,
@@ -596,6 +611,15 @@ namespace Engrave.UI
             var item = new ToolStripMenuItem(text) { Enabled = !added, ForeColor = added ? _theme.Dim : _theme.Text };
             item.Click += (s, e) => AddPropertyRow(name, true);
             return item;
+        }
+
+        private void ApplyPartSelection()
+        {
+            _selectionPending = false;
+            var picked = new List<int>();
+            foreach (int i in _parts.SelectedIndices) picked.Add(i);
+            if (picked.Count == 1) PartChosen?.Invoke(picked[0]);
+            else if (picked.Count > 1) PartsChosen?.Invoke(picked);
         }
 
         /// <summary>A tick: bright for parts engraved in this run, dim for parts that were engraved before.</summary>
@@ -656,10 +680,12 @@ namespace Engrave.UI
         {
             _propAdd.Click += (s, e) => PropertyMenu().Show(_propAdd, new Point(0, _propAdd.Height));
             _text.TextChanged += (s, e) => { if (!_loading) { _text.Invalid = false; TextEdited?.Invoke(); } };
+            // A Ctrl / Shift click fires several selection changes; they are handled once, after the click.
             _parts.SelectedIndexChanged += (s, e) =>
             {
-                if (_loading || _parts.SelectedIndices.Count != 1) return;
-                PartChosen?.Invoke(_parts.SelectedIndices[0]);
+                if (_loading || _selectionPending) return;
+                _selectionPending = true;
+                BeginInvoke(new Action(ApplyPartSelection));
             };
             // A click on the row that is already selected changes no selection, but should still go on at that part.
             int selectedBefore = -1;
