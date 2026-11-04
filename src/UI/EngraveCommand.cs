@@ -34,6 +34,7 @@ namespace Engrave.UI
             public TopSide Side;
             public string Text;
             public bool TextEdited, Done, Skipped;
+            public readonly Dictionary<string, string> Values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // iProperty values typed for this part
         }
 
         private static EngraveCommand _active;
@@ -218,7 +219,7 @@ namespace Engrave.UI
             _panel = new EngravePanel(Theme.Detect(_app), _asm != null || _drawing != null);
             _panel.ShowSheetOption(_drawing != null);
             _panel.LoadSettings(_settings);
-            _panel.ReadValue = name => EngraveText.ReadProperty(_top, name);
+            _panel.ReadValue = name => ValueFor(_current >= 0 ? _items[_current] : null, name);
             _panel.SetProperties(_settings.Properties);
 
             _panel.OrderChanged += OnOrderChanged;
@@ -307,6 +308,8 @@ namespace Engrave.UI
                 return;
             }
             if (item.Side == null) item.Side = FindSide(item);
+            _panel.RefreshPropertyValues();   // the iProperties of this part
+            ShowOrderHint();
             if (!item.TextEdited) item.Text = ComposeText(item);
             _panel.SetText(item.Text);
             string info = item.Side.Info;
@@ -322,7 +325,13 @@ namespace Engrave.UI
         /// <summary>[iProperty texts ]part name, and in a drawing " - sheet number" when that option is on.</summary>
         private string ComposeText(Item item)
         {
-            string text = EngraveText.Compose(string.Join(" ", _panel.PropertyTexts.Where(v => v.Length > 0)), item.Part, _settings.MaxPartChars);
+            var parts = new List<string>();
+            foreach (PropertySpec spec in _panel.PropertySpecs)
+            {
+                string value = ValueFor(item, spec.Name).Trim();
+                if (value.Length > 0) parts.Add(spec.Before + value + spec.After);
+            }
+            string text = EngraveText.Compose(string.Join(" ", parts), item.Part, _settings.MaxPartChars);
             return item.Sheet > 0 && _settings.AddSheetNumber ? text + " - " + item.Sheet : text;
         }
 
@@ -523,8 +532,38 @@ namespace Engrave.UI
             return list;
         }
 
+        /// <summary>
+        /// The value of an iProperty for a part: what was typed for it in this run, else the part's own iProperty, else
+        /// the iProperty of the open assembly or drawing (for example an order number kept only there).
+        /// </summary>
+        private string ValueFor(Item item, string name)
+        {
+            if (item != null && item.Values.TryGetValue(name, out string typed)) return typed;
+            return OwnValue(item, name);
+        }
+
+        private string OwnValue(Item item, string name)
+        {
+            string value = item != null ? EngraveText.ReadProperty((Document)item.Part, name) : "";
+            return value.Length > 0 ? value : EngraveText.ReadProperty(_top, name);
+        }
+
+        /// <summary>Values typed in the panel belong to the part being engraved now; others keep their own.</summary>
+        private void KeepTypedValues()
+        {
+            if (_current < 0) return;
+            Item item = _items[_current];
+            IList<string> names = _panel.PropertyNames, values = _panel.PropertyValues;
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (values[i] == OwnValue(item, names[i]).Trim()) item.Values.Remove(names[i]);
+                else item.Values[names[i]] = values[i];
+            }
+        }
+
         private void OnOrderChanged()
         {
+            KeepTypedValues();
             ShowOrderHint();
             RecomposeTexts();
             if (_mode != PanelMode.Picking || _current < 0) return;

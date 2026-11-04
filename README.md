@@ -16,7 +16,7 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
   shows which parts are engraved: bright for this run, dim for earlier.
 - **Drawing**: every sheet is one row, for the part in its first view. That part opens in its own window to pick the
   face; the windows are closed again at the end. The text is built the same way as elsewhere (iProperties, read from
-  the drawing, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**. All
+  each part, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**. All
   sheets are listed in order; for a range, Shift click the first and the last sheet, or select their views before
   you start.
 - **Top side found for you** (sheet metal): the side with the inside of most bends ("bends up") is shown in green and
@@ -31,7 +31,9 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
   `ordernummer`). Pick them like in the iProperty Manager: Summary, Project, Status, or Custom with the custom
   iProperties of the open document and their values, or type any name. Each has its own value field, a small
   **before** and **after** field for text around the value (for example `X` after `Aantal`, giving `5X`), and a
-  remove button. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
+  remove button. The values are read from each part itself; a part without that iProperty uses the value of the
+  open assembly or drawing. The fields show the values of the part being engraved, and a value you type there is
+  used for that part only. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
   You can still change the text per part before you click a face.
 - **Place it yourself**: the text starts where you click, along the longest straight edge and readable from your view.
   Drag it or turn it (Sketch → Rotate), then **Finish Sketch** in Inventor or in the panel. **Cancel** while

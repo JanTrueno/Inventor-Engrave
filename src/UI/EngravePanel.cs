@@ -63,8 +63,20 @@ namespace Engrave.UI
         // column titles above the iProperty rows
         private Label _colBefore, _colValue, _colAfter;
 
-        /// <summary>Reads the value of an iProperty from the open document; set by the command.</summary>
+        /// <summary>Reads the value of an iProperty for the part being engraved; set by the command.</summary>
         public Func<string, string> ReadValue;
+
+        /// <summary>Shows the values of the iProperties for another part (a typed value is not an edit here).</summary>
+        public void RefreshPropertyValues()
+        {
+            bool wasLoading = _loading;
+            _loading = true;
+            foreach (PropertyRow row in _propRows)
+            {
+                try { row.Value.Text = ReadValue?.Invoke(row.Name) ?? ""; } catch { row.Value.Text = ""; }
+            }
+            _loading = wasLoading;
+        }
 
         /// <summary>Custom iProperties of the open document, with their values, for the pick menu; set by the command.</summary>
         public Func<IList<KeyValuePair<string, string>>> CustomProperties;
@@ -159,10 +171,6 @@ namespace Engrave.UI
 
         public IList<string> PropertyNames => _propRows.ConvertAll(r => r.Name);
         public IList<string> PropertyValues => _propRows.ConvertAll(r => r.Value.Text.Trim());
-
-        /// <summary>What each iProperty adds to the text: before + value + after, or "" when its value is empty.</summary>
-        public IList<string> PropertyTexts => _propRows.ConvertAll(r =>
-            r.Value.Text.Trim().Length == 0 ? "" : r.Before.Text + r.Value.Text.Trim() + r.After.Text);
 
         public List<PropertySpec> PropertySpecs => _propRows.ConvertAll(r => new PropertySpec { Name = r.Name, Before = r.Before.Text, After = r.After.Text });
 
