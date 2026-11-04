@@ -57,11 +57,12 @@ namespace Engrave.UI
             public string Name;
             public Label Label;
             public FieldBox Before, Value, After;
+            public CheckBox Keep;
             public IconButton Remove;
         }
 
         // column titles above the iProperty rows
-        private Label _colBefore, _colValue, _colAfter;
+        private Label _colBefore, _colValue, _colAfter, _colKeep;
 
         /// <summary>Reads the value of an iProperty for the part being engraved; set by the command.</summary>
         public Func<string, string> ReadValue;
@@ -73,6 +74,7 @@ namespace Engrave.UI
             _loading = true;
             foreach (PropertyRow row in _propRows)
             {
+                if (row.Keep.Checked) continue;   // the value filled in once stays for every part
                 try { row.Value.Text = ReadValue?.Invoke(row.Name) ?? ""; } catch { row.Value.Text = ""; }
             }
             _loading = wasLoading;
@@ -165,14 +167,22 @@ namespace Engrave.UI
             _loading = true;
             foreach (PropertyRow row in _propRows) DisposeRow(row);
             _propRows.Clear();
-            foreach (PropertySpec p in specs ?? new PropertySpec[0]) AddPropertyRow(p.Name, false, p.Before, p.After);
+            foreach (PropertySpec p in specs ?? new PropertySpec[0]) AddPropertyRow(p.Name, false, p.Before, p.After, p.Keep);
             _loading = false;
         }
 
         public IList<string> PropertyNames => _propRows.ConvertAll(r => r.Name);
         public IList<string> PropertyValues => _propRows.ConvertAll(r => r.Value.Text.Trim());
 
-        public List<PropertySpec> PropertySpecs => _propRows.ConvertAll(r => new PropertySpec { Name = r.Name, Before = r.Before.Text, After = r.After.Text });
+        public List<PropertySpec> PropertySpecs => _propRows.ConvertAll(r => new PropertySpec { Name = r.Name, Before = r.Before.Text, After = r.After.Text, Keep = r.Keep.Checked });
+
+        /// <summary>The value of an iProperty whose "keep" box is ticked: the same for every part.</summary>
+        public bool TryKeptValue(string name, out string value)
+        {
+            PropertyRow row = _propRows.Find(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+            value = row != null && row.Keep.Checked ? row.Value.Text.Trim() : null;
+            return value != null;
+        }
 
         /// <summary>Marks the value of one iProperty as unusable (for example the placeholder for "not filled in").</summary>
         public void MarkProperty(int index, bool invalid)
@@ -180,7 +190,7 @@ namespace Engrave.UI
             if (index >= 0 && index < _propRows.Count) _propRows[index].Value.Invalid = invalid;
         }
 
-        private void AddPropertyRow(string name, bool notify, string before = "", string after = "")
+        private void AddPropertyRow(string name, bool notify, string before = "", string after = "", bool keep = false)
         {
             name = (name ?? "").Trim();
             if (name.Length == 0 || _propRows.Exists(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))) return;
@@ -191,6 +201,7 @@ namespace Engrave.UI
                 Before = Affix(name, "before"),
                 Value = new FieldBox(_theme) { Anchor = AnchorStyles.Left | AnchorStyles.Right, Margin = new Padding(0, 3, 0, 3) },
                 After = Affix(name, "after"),
+                Keep = new CheckBox { AutoSize = true, Checked = keep, Margin = new Padding(6, 6, 0, 3), ForeColor = _theme.Text, BackColor = Color.Transparent },
                 Remove = new IconButton(_theme, "Remove " + name + " from the text", ActionIcons.Delete) { Size = new Size(26, 22), Margin = new Padding(4, 3, 0, 3) }
             };
             bool wasLoading = _loading;
@@ -201,6 +212,19 @@ namespace Engrave.UI
             _loading = wasLoading;
             foreach (FieldBox box in new[] { row.Before, row.Value, row.After })
                 box.TextChanged += (s, e) => { if (!_loading) OrderChanged?.Invoke(); };
+            _tips.SetToolTip(row.Keep, "Keep: the value of " + name + " filled in here is used for every part, instead of each part's own iProperty");
+            row.Keep.CheckedChanged += (s, e) =>
+            {
+                if (_loading) return;
+                if (!row.Keep.Checked)   // back to each part's own value
+                {
+                    _loading = true;
+                    try { row.Value.Text = ReadValue?.Invoke(name) ?? ""; } catch { }
+                    _loading = false;
+                }
+                OrderChanged?.Invoke();
+                SettingsChanged?.Invoke();
+            };
             row.Remove.Click += (s, e) =>
             {
                 _propRows.Remove(row);
@@ -225,7 +249,7 @@ namespace Engrave.UI
 
         private void DisposeRow(PropertyRow row)
         {
-            foreach (Control c in new Control[] { row.Label, row.Before, row.Value, row.After, row.Remove })
+            foreach (Control c in new Control[] { row.Label, row.Before, row.Value, row.After, row.Keep, row.Remove })
             {
                 try { _propList.Controls.Remove(c); c.Dispose(); } catch { }
             }
@@ -241,6 +265,7 @@ namespace Engrave.UI
             _propList.Controls.Add(_colBefore, 1, 0);
             _propList.Controls.Add(_colValue, 2, 0);
             _propList.Controls.Add(_colAfter, 3, 0);
+            _propList.Controls.Add(_colKeep, 4, 0);
             for (int i = 0; i < _propRows.Count; i++)
             {
                 _propList.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -248,7 +273,8 @@ namespace Engrave.UI
                 _propList.Controls.Add(_propRows[i].Before, 1, i + 1);
                 _propList.Controls.Add(_propRows[i].Value, 2, i + 1);
                 _propList.Controls.Add(_propRows[i].After, 3, i + 1);
-                _propList.Controls.Add(_propRows[i].Remove, 4, i + 1);
+                _propList.Controls.Add(_propRows[i].Keep, 4, i + 1);
+                _propList.Controls.Add(_propRows[i].Remove, 5, i + 1);
             }
             _propList.Visible = _propRows.Count > 0;
             _propList.ResumeLayout();
@@ -462,16 +488,19 @@ namespace Engrave.UI
             var t = Table();
             var intro = new Label { Text = "iProperties in front of the part name, in this order:", AutoSize = true, Tag = "keep", ForeColor = _theme.Dim };
             Wide(t, intro);
-            _propList.ColumnCount = 5;
+            _propList.ColumnCount = 6;
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LabelWidth));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
             _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
+            _propList.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30));
             Label Title(string text) => new Label { Text = text, AutoSize = true, Tag = "keep", ForeColor = _theme.Dim, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 0), Font = new Font(Font.FontFamily, 7.5f) };
             _colBefore = Title("before");
             _colValue = Title("value");
             _colAfter = Title("after");
+            _colKeep = Title("keep");
+            _tips.SetToolTip(_colKeep, "Ticked: the value filled in once is used for every part");
             _propList.Visible = false;
             Wide(t, _propList);
             _propList.Anchor = AnchorStyles.Left | AnchorStyles.Right;

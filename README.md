@@ -13,7 +13,8 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
   out, and so are standard Content Center parts (bolts, nuts). A read-only part (checked in) is listed as such. Click any part in the list to go on from there, or **Skip** to the next one. To engrave only some parts, Ctrl or
   Shift click them in the list, or select them (or a subassembly) in the model browser before you click Engrave:
   Skip and the next part then only go through those, and a bar marks the part being engraved now. A checkmark
-  shows which parts are engraved: bright for this run, dim for earlier.
+  shows which parts are engraved: bright for this run, dim for earlier. While you work, every other part is
+  see-through, so the part being engraved stands out; they are solid again when you finish or cancel.
 - **Drawing**: every sheet is one row, for the part in its first view. That part opens in its own window to pick the
   face; the windows are closed again at the end. The text is built the same way as elsewhere (iProperties, read from
   each part, and the part name), with ` - sheet number` after it unless you untick **Add the sheet number**. All
@@ -33,7 +34,8 @@ built in Inventor's own style and follows your theme, like the Tab and Slot add-
   **before** and **after** field for text around the value (for example `X` after `Aantal`, giving `5X`), and a
   remove button. The values are read from each part itself; a part without that iProperty uses the value of the
   open assembly or drawing. The fields show the values of the part being engraved, and a value you type there is
-  used for that part only. A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
+  used for that part only. Tick **keep** to use the value you fill in once for every part instead (the tick is
+  remembered). A **Placeholder** value in the settings (for example `160100`) means "not filled in yet" and is refused.
   You can still change the text per part before you click a face.
 - **Place it yourself**: the text starts where you click, along the longest straight edge and readable from your view.
   Drag it or turn it (Sketch → Rotate), then **Finish Sketch** in Inventor or in the panel. **Cancel** while

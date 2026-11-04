@@ -301,7 +301,7 @@ namespace Engrave.UI
             StopPicking();
             _current = index;
             Item item = _items[index];
-            SetTransparent(item, false);   // a finished part chosen again is solid while it is worked on
+            FocusOn(item);   // everything else see-through, this part solid
             try { ShowPart(item); }
             catch (Exception ex)
             {
@@ -540,6 +540,7 @@ namespace Engrave.UI
         /// </summary>
         private string ValueFor(Item item, string name)
         {
+            if (_panel != null && _panel.TryKeptValue(name, out string kept)) return kept;   // "keep": the same for every part
             if (item != null && item.Values.TryGetValue(name, out string typed)) return typed;
             return OwnValue(item, name);
         }
@@ -558,6 +559,7 @@ namespace Engrave.UI
             IList<string> names = _panel.PropertyNames, values = _panel.PropertyValues;
             for (int i = 0; i < names.Count; i++)
             {
+                if (_panel.TryKeptValue(names[i], out _)) { item.Values.Remove(names[i]); continue; }
                 if (values[i] == OwnValue(item, names[i]).Trim()) item.Values.Remove(names[i]);
                 else item.Values[names[i]] = values[i];
             }
@@ -860,7 +862,6 @@ namespace Engrave.UI
                 item.Skipped = false;
                 _engraved++;
                 Touch(item.Part).SetAside = true;   // its earlier engraving, if any, is now set aside
-                SetTransparent(item, true);   // finished parts fade out, so what is left stands out
                 _panel.SetStatus(status, false);
                 if (_walk.Count > 1) Advance();
                 else { RefreshParts(); StopPicking(); _panel.SetStatus(status + " Click Done to finish.", false); }
@@ -1168,42 +1169,56 @@ namespace Engrave.UI
             catch { return false; }
         }
 
-        // ----- transparency of finished parts -------------------------------------------------------------------
+        // ----- transparency: only the part being engraved is solid ---------------------------------------------
 
-        private readonly List<ComponentOccurrence> _madeTransparent = new List<ComponentOccurrence>();
+        private sealed class Leaf
+        {
+            public ComponentOccurrence Occ;
+            public string File;
+            public bool MadeTransparent;   // this command made it see-through
+        }
+
+        private List<Leaf> _leaves;
 
         /// <summary>
-        /// Makes every occurrence of the part see-through (or solid again). Only occurrences this command made
-        /// see-through are turned back, and all of them are restored when the command ends.
+        /// Makes every part in the assembly see-through except the one being engraved, so it stands out. Only
+        /// occurrences that were solid are changed, and those are made solid again when the command ends.
         /// </summary>
-        private void SetTransparent(Item item, bool on)
+        private void FocusOn(Item item)
         {
             if (_asm == null) return;
             try
             {
-                if (on)
+                if (_leaves == null)
                 {
-                    foreach (ComponentOccurrence occ in _asm.ComponentDefinition.Occurrences.get_AllReferencedOccurrences(item.Part.ComponentDefinition))
+                    _leaves = new List<Leaf>();
+                    foreach (ComponentOccurrence occ in _asm.ComponentDefinition.Occurrences.AllLeafOccurrences)
                     {
                         try
                         {
-                            if (occ.Transparent) continue;
-                            occ.Transparent = true;
-                            _madeTransparent.Add(occ);
+                            if (occ.Suppressed) continue;
+                            _leaves.Add(new Leaf { Occ = occ, File = (occ.Definition.Document as Document)?.FullDocumentName ?? "" });
                         }
-                        catch { /* occurrence cannot be changed */ }
+                        catch { /* cannot be read */ }
                     }
                 }
-                else
+                string file = item.Part.FullDocumentName;
+                foreach (Leaf leaf in _leaves)
                 {
-                    foreach (ComponentOccurrence occ in _madeTransparent.ToArray())
+                    try
                     {
-                        bool same;
-                        try { same = SameFile(occ.Definition.Document as Document, item.Part); } catch { same = false; }
-                        if (!same) continue;
-                        try { occ.Transparent = false; } catch { }
-                        _madeTransparent.Remove(occ);
+                        bool current = string.Equals(leaf.File, file, StringComparison.OrdinalIgnoreCase);
+                        if (current)
+                        {
+                            if (leaf.MadeTransparent) { leaf.Occ.Transparent = false; leaf.MadeTransparent = false; }
+                        }
+                        else if (!leaf.MadeTransparent && !leaf.Occ.Transparent)
+                        {
+                            leaf.Occ.Transparent = true;
+                            leaf.MadeTransparent = true;
+                        }
                     }
+                    catch { /* occurrence cannot be changed */ }
                 }
                 _app.ActiveView.Update();
             }
@@ -1212,8 +1227,10 @@ namespace Engrave.UI
 
         private void RestoreTransparency()
         {
-            foreach (ComponentOccurrence occ in _madeTransparent) { try { occ.Transparent = false; } catch { } }
-            _madeTransparent.Clear();
+            if (_leaves == null) return;
+            foreach (Leaf leaf in _leaves)
+                if (leaf.MadeTransparent) { try { leaf.Occ.Transparent = false; } catch { } leaf.MadeTransparent = false; }
+            _leaves = null;
         }
     }
 }

@@ -12,6 +12,9 @@ namespace Engrave.Core
         public string Name { get; set; } = "";
         public string Before { get; set; } = "";
         public string After { get; set; } = "";
+
+        /// <summary>The value filled in once is used for every part, instead of each part's own iProperty.</summary>
+        public bool Keep { get; set; }
     }
 
     /// <summary>The panel's settings, remembered between sessions in %APPDATA%\Engrave\settings.json.</summary>
